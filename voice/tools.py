@@ -17,7 +17,8 @@ from .store import get_store, now
 log = logging.getLogger("tools")
 
 TOOL_SPECS = [
-    ToolSpec("record_checkin", "Save the answers from this check-in.", {
+    ToolSpec("record_checkin", "Save the answers from this check-in. Always write the values in English, "
+             "even when the conversation is in another language.", {
         "type": "object",
         "properties": {
             "ac_working": {"type": "string", "enum": ["yes", "no", "unknown", "not_applicable"],
@@ -40,7 +41,7 @@ TOOL_SPECS = [
         "type": "object",
         "properties": {
             "level": {"type": "string", "enum": ["warning", "emergency"]},
-            "reason": {"type": "string", "description": "Short reason in plain words."},
+            "reason": {"type": "string", "description": "Short reason in plain English words."},
         },
         "required": ["level", "reason"],
     }),
@@ -75,6 +76,7 @@ class CallContext:
     flags: list[dict] = field(default_factory=list)
     callback_booked: bool = False
     ended: bool = False
+    end_refusals: int = 0
     hangup_cb: object = None  # async callable
 
 
@@ -148,6 +150,16 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
         return {"name": contact["name"], "role": contact["role"]}
 
     if name == "end_call":
+        # Guard in code: don't hang up before the check-in is recorded with real answers.
+        checkin = await store.get("checkins", ctx.checkin_id) or {}
+        unanswered = [q for q, k in (("drinking water", "water"),) if checkin.get(k) in (None, "unknown")]
+        if "symptoms" not in checkin:
+            unanswered.append("symptoms")
+        emergency = any(f.get("level") == "emergency" for f in ctx.flags)
+        if unanswered and not emergency and ctx.end_refusals < 2:
+            ctx.end_refusals += 1
+            return {"ok": False, "error": "Do not hang up yet. Ask about: " + ", ".join(unanswered)
+                    + ". Then call record_checkin, say goodbye, and call end_call."}
         ctx.ended = True
         if ctx.hangup_cb:
             asyncio.create_task(ctx.hangup_cb())

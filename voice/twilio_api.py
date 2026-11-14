@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from xml.sax.saxutils import escape
 
 import httpx
@@ -58,5 +59,8 @@ async def notify_by_voice(to: str, message: str) -> str | None:
     """Call a contact and read them an alert. Returns call SID."""
     if not to:
         return None
+    if os.environ.get("NOTIFY_DRY_RUN"):
+        log.info("[dry-run] would call %s: %s", to[-4:], message)
+        return "dry-run"
     res = await create_call(to, twiml=say_twiml(message))
     return res.get("sid")

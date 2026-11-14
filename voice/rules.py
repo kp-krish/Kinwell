@@ -48,7 +48,7 @@ def evaluate(person: dict, checkin: dict) -> dict:
     flags = checkin.get("flags") or []
     if any(f.get("level") == "emergency" for f in flags):
         return {"level": "emergency", "reasons": [f["reason"] for f in flags if f.get("level") == "emergency"]}
-    reasons += [f["reason"] for f in flags if f.get("level") == "warning"]
+    flag_reasons = [f["reason"] for f in flags if f.get("level") == "warning"]
     if checkin.get("ac_working") == "no":
         reasons.append("AC not working")
     if checkin.get("water") == "no":
@@ -60,6 +60,10 @@ def evaluate(person: dict, checkin: dict) -> dict:
     syms = [s.lower() for s in checkin.get("symptoms") or []]
     if syms:
         reasons.append("symptoms: " + ", ".join(syms))
+    # Recorded facts are the source of truth; the agent's own flag wording is used only
+    # when no recorded fact explains the warning (avoids "AC broken; AC still off; AC not working").
+    if not reasons:
+        reasons = flag_reasons
     reasons = list(dict.fromkeys(reasons))
     return {"level": "warning" if reasons else "clear", "reasons": reasons}
 
