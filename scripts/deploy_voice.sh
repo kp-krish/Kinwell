@@ -9,8 +9,8 @@ REPO=$ACCT.dkr.ecr.$REGION.amazonaws.com/heatcheck-voice
 TAG=$(git rev-parse --short HEAD)-$(date +%H%M%S)
 
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin "$ACCT.dkr.ecr.$REGION.amazonaws.com" >/dev/null
-docker build -q -t "$REPO:$TAG" . >/dev/null
-docker push -q "$REPO:$TAG" >/dev/null
+docker build -t "$REPO:$TAG" . 2>&1 | tail -1
+docker push "$REPO:$TAG" 2>&1 | tail -1
 echo "pushed $REPO:$TAG"
 
 aws cloudformation deploy --region $REGION --stack-name heatcheck-sunhacks-voice \
