@@ -27,6 +27,21 @@ async def first_contact(person: dict) -> dict | None:
     return rows[0] if rows else None
 
 
+async def _warning_alerts_today(person: dict) -> int:
+    start = now().replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = await get_store().find("alerts", {"resident_id": person["_id"], "level": "warning"})
+    return sum(1 for r in rows if r.get("created_at") and r["created_at"] >= start)
+
+
+async def next_contact(person: dict) -> dict | None:
+    """Ladder: the first warning today goes to contact 1, a still-bad follow-up to contact 2, etc."""
+    rows = await contacts_for(person)
+    if not rows:
+        return None
+    step = await _warning_alerts_today(person)
+    return rows[min(step, len(rows) - 1)]
+
+
 def evaluate(person: dict, checkin: dict) -> dict:
     """Return {'level': 'clear'|'warning'|'emergency', 'reasons': [...]} from recorded facts."""
     reasons: list[str] = []
@@ -69,9 +84,12 @@ async def _write_alert(person: dict, checkin_id: str | None, level: str, reason:
 
 
 async def escalate_now(person: dict, checkin_id: str | None, reason: str, emergency: bool) -> None:
-    """Emergency: call every escalation contact now. Warning: call the first contact."""
-    contacts = await contacts_for(person)
-    targets = contacts if emergency else contacts[:1]
+    """Emergency: call every escalation contact now. Warning: call the next contact on the ladder."""
+    if emergency:
+        targets = await contacts_for(person)
+    else:
+        nxt = await next_contact(person)
+        targets = [nxt] if nxt else []
     notified = []
     for c in targets:
         try:
@@ -93,9 +111,14 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
     if result["level"] == "emergency":
         pass  # contacts were already alerted during the call
     elif result["level"] == "warning":
+        ladder_len = len(await contacts_for(person))
+        step = await _warning_alerts_today(person)
         await escalate_now(person, checkin_id, "; ".join(result["reasons"]), emergency=False)
-        if not callback_booked:
+        # Book one follow-up per ladder rung; once every contact has been alerted,
+        # stop calling and leave the open alert for a human on the dashboard.
+        if not callback_booked and step + 1 < max(ladder_len, 1):
             await scheduler.schedule_checkin(person["_id"], 30, "warning-sign follow-up")
+        await store.update("checkins", checkin_id, {"ladder_step": step + 1})
     elif person.get("playbook") == "crew":
         await _crew_consecutive_check(person)
     return result

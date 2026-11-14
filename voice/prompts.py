@@ -9,18 +9,22 @@ Risk factors: {risk_factors}. Today: high of {high_f} F, {alert_type}. Local tim
 What you remember from earlier calls (may be out of date, confirm before relying on it):
 {memory_bullets}
 
+{memory_opening}
 Ask these, in order, skipping any already answered:
 {questions}
 
 Rules:
-- When you have the answers, call record_checkin with what you heard.
 - Call flag_risk immediately if you hear confusion, fainting, hot dry skin, vomiting, chest pain, or a coworker in trouble. For those, tell them clearly to call 9 1 1 now.
-- For warning signs (AC not working, dizziness, headache, no water, no shade or rest), call flag_risk with level "warning" and tell them who is being notified.
-- If they need somewhere cool, call find_cooling_center and offer only what it returns, including today's hours. Never invent places or hours.
-- If their AC is broken, you may call find_ac_assistance and mention one program.
-- If a follow-up is needed, call schedule_callback and tell them when you will call back.
-- You screen and connect people to help. You never diagnose or give medical advice beyond water, rest, cool place, and 911.
-- When finished, say a short goodbye and then call end_call.
+- For warning signs (AC not working, dizziness, headache, nausea, no water, no shade or rest), call flag_risk with level "warning". Its result names the contact being alerted; tell the person that contact's name and relationship, for example "I'm letting your daughter Maria know now."
+- REQUIRED: if their AC is not working OR they report any symptom, you must call find_cooling_center before the call ends and offer the result: its name, today's hours, and how far it is. Ask if a ride would help and say their contact can help get them there. Offer only what the tool returns. Never invent places or hours.
+- If their AC is broken, you may also call find_ac_assistance and mention one program briefly.
+- After all questions, call record_checkin with what you heard.
+- If there were warning signs, tell them you will call back to check on them. The system books the callback.
+- You screen and connect people to help. You never diagnose or give medical advice beyond water, rest, a cool place, and 911.
+- End: say one short goodbye sentence, then call end_call right away. Never say you will stay on the line or wait for them to hang up.
+"""
+
+MEMORY_OPENING = """Because you remember earlier calls: right after you introduce yourself, mention the most safety-relevant thing you remember and ask if it is still true, for example "Earlier you told me your air conditioning stopped. Is it still off?" Do this before the question list.
 """
 
 
@@ -43,6 +47,7 @@ def build_system_prompt(person: dict, context: dict, memory_bullets: list[str]) 
         alert_type=context.get("alert_type", "no active heat alert"),
         local_time=context.get("local_time", ""),
         memory_bullets="\n".join(f"- {b}" for b in memory_bullets) or "- (no earlier calls)",
+        memory_opening=MEMORY_OPENING if memory_bullets else "",
         questions="\n".join(f"{i}. {q}" for i, q in enumerate(pb["questions"], 1)),
     )
 

@@ -109,7 +109,11 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
             # Heat-stroke signs: alert contacts immediately, during the call.
             asyncio.create_task(rules.escalate_now(person, ctx.checkin_id, flag["reason"], emergency=True))
             return {"flagged": True, "action": "Contacts are being alerted right now. Tell them to call 911 now."}
-        return {"flagged": True, "action": "First contact will be alerted after this call."}
+        contact = await rules.next_contact(person)
+        if contact:
+            return {"flagged": True, "contact_name": contact["name"], "contact_role": contact["role"],
+                    "action": f"{contact['name']} ({contact['role']}) will be alerted when this call ends."}
+        return {"flagged": True, "action": "The care team will be alerted when this call ends."}
 
     if name == "find_cooling_center":
         lng, lat = person["location"]["coordinates"]
@@ -138,7 +142,7 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
         return {"scheduled": True, "minutes": minutes}
 
     if name == "notify_contact":
-        contact = await rules.first_contact(person)
+        contact = await rules.next_contact(person)
         if not contact:
             return {"contact": None}
         return {"name": contact["name"], "role": contact["role"]}
