@@ -29,6 +29,10 @@ log = logging.getLogger("app")
 
 app = FastAPI(title="HeatCheck voice")
 
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
 TRANSCRIPT_TTL_DAYS = 30
 PHX = dt.timezone(dt.timedelta(hours=-7))  # Arizona has no DST
 
@@ -237,10 +241,82 @@ async def api_briefing():
 async def api_state():
     store = get_store()
     residents = await store.find("residents")
-    checkins = await store.find("checkins", sort="started_at", limit=200)
+    checkins = await store.find("checkins", sort="started_at", limit=300)
     alerts = await store.find("alerts", sort="created_at", limit=100)
     resources = await store.find("resources")
+    crews = await store.find("crews")
+    runs = await store.find("scout_runs", sort="started_at", limit=5)
     for c in checkins:
         c.pop("transcript", None)
-    return JSONResponse(_jsonable({"residents": residents, "checkins": checkins,
-                                   "alerts": alerts, "resources": resources}))
+    return JSONResponse(_jsonable({"residents": residents, "checkins": checkins, "alerts": alerts,
+                                   "resources": resources, "crews": crews, "scout_runs": runs,
+                                   "server_time": now()}))
+
+
+@app.get("/api/checkins/{checkin_id}")
+async def api_checkin(checkin_id: str):
+    c = await get_store().get("checkins", checkin_id)
+    if not c:
+        raise HTTPException(404)
+    return JSONResponse(_jsonable(c))
+
+
+@app.post("/api/alerts/{alert_id}/ack")
+async def api_ack(alert_id: str, payload: dict | None = None):
+    who = (payload or {}).get("by", "caseworker")
+    await get_store().update("alerts", alert_id, {"acknowledged_by": who, "resolved_at": now()})
+    return {"ok": True}
+
+
+@app.post("/api/simulate-heat-warning")
+async def api_simulate(payload: dict | None = None):
+    """Demo trigger: an NWS Extreme Heat Warning starts a heat-day run.
+    Calls every enrolled person with a phone number (or just person_id), and wakes Resource Scout."""
+    payload = payload or {}
+    ctx = {"high_f": payload.get("high_f", 112), "alert_type": "NWS Extreme Heat Warning"}
+    store = get_store()
+    targets = [payload["person_id"]] if payload.get("person_id") else \
+        [r["_id"] for r in await store.find("residents") if r.get("phone") and r.get("playbook") == "resident"]
+    placed = []
+    for pid in targets:
+        try:
+            placed.append({pid: await place_call(pid, reason="NWS heat warning", context=ctx)})
+        except HTTPException as e:
+            placed.append({pid: {"error": e.detail}})
+    scout = await wake_scout() if payload.get("wake_scout", True) else None
+    return {"calls": placed, "scout": scout}
+
+
+@app.post("/api/scout/refresh")
+async def api_scout_refresh():
+    return await wake_scout(trigger="caseworker")
+
+
+async def wake_scout(trigger: str = "heat_warning") -> dict:
+    """Wake the Resource Scout agent on Maritime and start a run. It sleeps again when idle."""
+    import os
+    import pathlib
+    import httpx
+    key = os.environ.get("MARITIME_API_KEY") or os.environ.get("MARITIME_API")
+    state_file = pathlib.Path(__file__).resolve().parent.parent / "scout" / "maritime_agent.json"
+    if not key or not state_file.exists():
+        return {"status": "skipped", "reason": "Maritime agent not deployed"}
+    agent_id = json.loads(state_file.read_text())["agent_id"]
+    base = "https://api.maritime.sh"
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            await c.post(f"{base}/api/agents/{agent_id}/start", headers={"Authorization": f"Bearer {key}"})
+            for _ in range(30):
+                try:
+                    r = await c.get(f"{base}/a/{agent_id}/health")
+                    if r.status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(2)
+            r = await c.post(f"{base}/a/{agent_id}/run", json={"trigger": trigger},
+                             headers={"Authorization": f"Bearer {os.environ.get('SCOUT_TOKEN', '')}"})
+            return {"status": "woken", "run": r.json() if r.content else r.status_code}
+    except Exception as e:
+        log.exception("wake scout failed")
+        return {"status": "error", "error": str(e)}
