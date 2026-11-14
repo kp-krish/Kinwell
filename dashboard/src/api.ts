@@ -36,8 +36,25 @@ export interface State {
 }
 export interface Briefing { headline: string; calls: number; items: { resident_id: string; name: string; priority: number; reason: string }[]; model?: string }
 
-async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(API + path, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
+const KEY_STORE = "heatcheck.staffKey";
+
+function staffKey(): string {
+  try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; }
+}
+
+async function j<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const write = !!init?.method && init.method !== "GET";
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...((init?.headers as Record<string, string>) || {}) };
+  if (write && staffKey()) headers["X-API-Key"] = staffKey();
+  const r = await fetch(API + path, { ...init, headers });
+  if (r.status === 401 && write && !retried) {
+    // Staff actions (calls, acknowledgements) need the staff key; ask once and remember it in this browser.
+    const k = window.prompt("Staff key required for this action:");
+    if (k) {
+      try { localStorage.setItem(KEY_STORE, k.trim()); } catch { /* private mode: key used for this call only */ }
+      return j<T>(path, { ...init, headers: { ...headers, "X-API-Key": k.trim() } }, true);
+    }
+  }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }

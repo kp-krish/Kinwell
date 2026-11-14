@@ -45,7 +45,7 @@ def public_base(request: Request | None = None) -> str:
 # ---------------------------------------------------------------- placing calls
 
 async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled check-in",
-                     context: dict | None = None) -> dict:
+                     context: dict | None = None, task_token: str | None = None) -> dict:
     store = get_store()
     person = await store.get("residents", person_id)
     if not person:
@@ -60,6 +60,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         "resident_id": person_id, "resident_name": person.get("name"),
         "playbook": person.get("playbook"), "started_at": now(), "attempt": attempt,
         "reason": reason, "call_status": "dialing", "context": context or {},
+        **({"task_token": task_token} if task_token else {}),
     })
     base = public_base()
     res = await twilio_api.create_call(
@@ -76,14 +77,83 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
 scheduler.place_call = place_call
 
 
+import hmac  # noqa: E402
+import os  # noqa: E402
+
+from fastapi import Header  # noqa: E402
+
+
+def _require(token_env: str, supplied: str | None) -> None:
+    """Shared-secret check. Unset token = local dev, allowed."""
+    expected = os.environ.get(token_env, "")
+    if expected and not (supplied and hmac.compare_digest(supplied, expected)):
+        raise HTTPException(401, "unauthorized")
+
+
+def require_dashboard(x_api_key: str | None = Header(None)) -> None:
+    _require("DASHBOARD_KEY", x_api_key)
+
+
+def require_internal(x_internal_token: str | None = Header(None)) -> None:
+    _require("INTERNAL_TOKEN", x_internal_token)
+
+
+@app.post("/internal/notify")
+async def internal_notify(payload: dict, x_internal_token: str | None = Header(None)):
+    """Step Functions rung: alert one contact on the ladder."""
+    require_internal(x_internal_token)
+    store = get_store()
+    person = await store.get("residents", payload["person_id"])
+    step = int(payload.get("step", 0))
+    ladder = await rules.contacts_for(person)
+    reason = "; ".join(payload.get("reasons") or []) or payload.get("level", "warning")
+    if payload.get("level") == "no_answer" and step > 0:
+        reason = "still not reachable after follow-up"
+    notified = await rules.escalate_now(person, payload.get("checkin_id"), reason, emergency=False,
+                                        findings=payload.get("findings", "") if step == 0 else "",
+                                        rung=step)
+    return {"notified": notified, "rung": step, "has_next_rung": step + 1 < len(ladder),
+            "next_contact": (ladder[step + 1]["name"] if step + 1 < len(ladder) else None)}
+
+
+@app.post("/internal/followup")
+async def internal_followup(payload: dict, x_internal_token: str | None = Header(None)):
+    """Step Functions rung: place a follow-up call; its result is sent back with the task token."""
+    require_internal(x_internal_token)
+    try:
+        res = await place_call(payload["person_id"], attempt=0, reason="escalation follow-up",
+                               context={"high_f": 112, "alert_type": "NWS Extreme Heat Warning"},
+                               task_token=payload["task_token"])
+    except HTTPException as e:
+        res = {"skipped": e.detail}
+    if res.get("skipped"):
+        from . import escalation
+        await escalation.report_followup(payload["task_token"], "no_answer", [str(res["skipped"])])
+    return res
+
+
+@app.post("/internal/heat-run")
+async def internal_heat_run(payload: dict, x_internal_token: str | None = Header(None)):
+    """Risk engine: a real NWS heat alert starts a heat-day run."""
+    require_internal(x_internal_token)
+    store = get_store()
+    alert_id = payload.get("alert_id") or "nws"
+    if await store.get("heat_runs", alert_id):
+        return {"skipped": "already ran for this alert"}
+    await store.insert("heat_runs", {"_id": alert_id, "alert_type": payload.get("alert_type"),
+                                     "headline": payload.get("headline"), "started_at": now()})
+    return await api_simulate({**payload, "source": "nws"})
+
+
 @app.get("/health")
 async def health():
     return {"ok": True, "store": type(get_store()).__name__}
 
 
 @app.post("/calls")
-async def start_call(payload: dict):
+async def start_call(payload: dict, x_api_key: str | None = Header(None)):
     """Start a check-in call: {"person_id": "res_lopez", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}"""
+    require_dashboard(x_api_key)
     ctx = {k: payload[k] for k in ("high_f", "alert_type") if k in payload}
     return await place_call(payload["person_id"], reason=payload.get("reason", "manual"), context=ctx)
 
@@ -276,13 +346,19 @@ async def api_checkin(checkin_id: str):
 
 
 @app.post("/api/alerts/{alert_id}/ack")
-async def api_ack(alert_id: str, payload: dict | None = None):
+async def api_ack(alert_id: str, payload: dict | None = None, x_api_key: str | None = Header(None)):
+    require_dashboard(x_api_key)
     who = (payload or {}).get("by", "caseworker")
     await get_store().update("alerts", alert_id, {"acknowledged_by": who, "resolved_at": now()})
     return {"ok": True}
 
 
 @app.post("/api/simulate-heat-warning")
+async def simulate_route(payload: dict | None = None, x_api_key: str | None = Header(None)):
+    require_dashboard(x_api_key)
+    return await api_simulate(payload)
+
+
 async def api_simulate(payload: dict | None = None):
     """Demo trigger: an NWS Extreme Heat Warning starts a heat-day run.
     Calls every enrolled person with a phone number (or just person_id), and wakes Resource Scout."""
@@ -302,7 +378,8 @@ async def api_simulate(payload: dict | None = None):
 
 
 @app.post("/api/scout/refresh")
-async def api_scout_refresh():
+async def api_scout_refresh(x_api_key: str | None = Header(None)):
+    require_dashboard(x_api_key)
     return await wake_scout(trigger="caseworker")
 
 
@@ -313,9 +390,10 @@ async def wake_scout(trigger: str = "heat_warning") -> dict:
     import httpx
     key = os.environ.get("MARITIME_API_KEY") or os.environ.get("MARITIME_API")
     state_file = pathlib.Path(__file__).resolve().parent.parent / "scout" / "maritime_agent.json"
-    if not key or not state_file.exists():
+    agent_id = os.environ.get("MARITIME_AGENT_ID") or (
+        json.loads(state_file.read_text())["agent_id"] if state_file.exists() else None)
+    if not key or not agent_id:
         return {"status": "skipped", "reason": "Maritime agent not deployed"}
-    agent_id = json.loads(state_file.read_text())["agent_id"]
     base = "https://api.maritime.sh"
     try:
         async with httpx.AsyncClient(timeout=20) as c:

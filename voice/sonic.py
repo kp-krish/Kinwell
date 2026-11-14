@@ -30,7 +30,7 @@ from aws_sdk_bedrock_runtime.models import (
 log = logging.getLogger("sonic")
 
 DEFAULT_MODEL_ID = os.environ.get("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0")
-DEFAULT_REGION = os.environ.get("AWS_REGION", "us-west-2")
+DEFAULT_REGION = os.environ.get("NOVA_REGION", "us-west-2")  # Sonic only exists in us-west-2
 
 # Phone audio is 8 kHz. Sonic accepts 8 kHz in; output rate is configurable.
 INPUT_SAMPLE_RATE = int(os.environ.get("SONIC_INPUT_RATE", "8000"))

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from . import scheduler, twilio_api
+from . import escalation, scheduler, twilio_api
 from .playbooks import PLAYBOOKS
 from .store import get_store, now
 
@@ -119,10 +119,14 @@ async def _write_alert(person: dict, checkin_id: str | None, level: str, reason:
 
 
 async def escalate_now(person: dict, checkin_id: str | None, reason: str, emergency: bool,
-                       findings: str = "") -> None:
-    """Emergency: call every escalation contact now. Warning: call the next contact on the ladder."""
+                       findings: str = "", rung: int | None = None) -> list[str]:
+    """Emergency: call every escalation contact now. Warning: call one contact on the ladder
+    (the given rung when Step Functions drives it, otherwise the next one today)."""
     if emergency:
         targets = await contacts_for(person)
+    elif rung is not None:
+        ladder = await contacts_for(person)
+        targets = [ladder[rung]] if rung < len(ladder) else []
     else:
         nxt = await next_contact(person)
         targets = [nxt] if nxt else []
@@ -135,6 +139,7 @@ async def escalate_now(person: dict, checkin_id: str | None, reason: str, emerge
             log.exception("notify %s failed", c.get("name"))
     await _write_alert(person, checkin_id, "emergency" if emergency else "warning", reason, notified)
     log.info("escalated %s level=%s notified=%s", person["_id"], "emergency" if emergency else "warning", notified)
+    return notified
 
 
 async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> dict:
@@ -148,6 +153,15 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
         return {"level": "no_answer", "reasons": ["call ended before check-in answers"]}
     result = evaluate(person, checkin)
     await store.update("checkins", checkin_id, {"risk_level": result["level"], "risk_reasons": result["reasons"]})
+
+    if checkin.get("task_token"):
+        # Follow-up call placed by the Step Functions ladder: it decides the next step.
+        await escalation.report_followup(checkin["task_token"], result["level"], result["reasons"])
+        return result
+    if result["level"] == "warning" and escalation.enabled():
+        await escalation.start_ladder(person, checkin_id, "warning", result["reasons"],
+                                      spoken_findings(person, checkin))
+        return result
 
     if result["level"] == "emergency":
         pass  # contacts were already alerted during the call
@@ -178,12 +192,20 @@ async def on_no_answer(person: dict, checkin_id: str, attempt: int, why: str = "
     """Missed call (no answer, busy, voicemail, or ended before answers): retry per playbook,
     then walk the escalation ladder. Never treated as safe."""
     pb = PLAYBOOKS[person.get("playbook", "resident")]
-    await get_store().update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer",
-                                                      "risk_reasons": [why]})
+    store = get_store()
+    await store.update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer",
+                                                "risk_reasons": [why]})
+    checkin = await store.get("checkins", checkin_id) or {}
+    if checkin.get("task_token"):
+        await escalation.report_followup(checkin["task_token"], "no_answer", [why])
+        return
     if attempt < pb["max_retries"]:
         await scheduler.schedule_checkin(person["_id"], pb["retry_minutes"], "retry after no answer",
                                          attempt=attempt + 1)
     else:
         first = person.get("first_name") or person.get("name", "they")
-        await escalate_now(person, checkin_id,
-                           f"{first} did not answer {attempt + 1} check-in calls in a row", emergency=False)
+        reason = f"{first} did not answer {attempt + 1} check-in calls in a row"
+        if escalation.enabled():
+            await escalation.start_ladder(person, checkin_id, "no_answer", [reason])
+        else:
+            await escalate_now(person, checkin_id, reason, emergency=False)

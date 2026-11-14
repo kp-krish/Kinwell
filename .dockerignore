@@ -1,0 +1,11 @@
+.env
+.env.*
+.venv
+.git
+dashboard
+scout
+scripts
+infra
+*.pdf
+**/__pycache__
+voice/requirements.lock.txt

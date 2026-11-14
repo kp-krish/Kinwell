@@ -1,0 +1,211 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  HeatCheck escalation ladder (Step Functions + Lambda) and risk engine
+  (EventBridge Scheduler polls NWS heat alerts for Maricopa County).
+
+Parameters:
+  VoiceUrl: { Type: String, Description: "https://<cloudfront domain> of the voice service" }
+  SecretName: { Type: String, Default: heatcheck/app }
+  NwsZone: { Type: String, Default: AZC013, Description: Maricopa County }
+
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+
+  # Thin action Lambda: forwards ladder steps to the voice service, which owns the rules.
+  ActionsFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: hcs-escalation-actions
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt LambdaRole.Arn
+      Environment:
+        Variables:
+          VOICE_URL: !Ref VoiceUrl
+          INTERNAL_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:INTERNAL_TOKEN}}"
+      Code:
+        ZipFile: |
+          import json, os, urllib.request
+
+          def handler(event, context):
+              action = event["action"]  # notify | followup
+              req = urllib.request.Request(
+                  os.environ["VOICE_URL"].rstrip("/") + "/internal/" + action,
+                  data=json.dumps(event).encode(), method="POST",
+                  headers={"Content-Type": "application/json", "X-Internal-Token": os.environ["INTERNAL_TOKEN"]})
+              with urllib.request.urlopen(req, timeout=25) as r:
+                  out = json.loads(r.read() or b"{}")
+              print(json.dumps({"action": action, "person": event.get("person_id"), "result": out})[:1000])
+              return out
+
+  # Risk engine: checks NWS for an active heat alert and starts a heat-day run.
+  RiskEngineFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: hcs-risk-engine
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt LambdaRole.Arn
+      Environment:
+        Variables:
+          VOICE_URL: !Ref VoiceUrl
+          NWS_ZONE: !Ref NwsZone
+          INTERNAL_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:INTERNAL_TOKEN}}"
+      Code:
+        ZipFile: |
+          import json, os, urllib.request
+
+          HEAT_EVENTS = {"Extreme Heat Warning", "Excessive Heat Warning", "Heat Advisory", "Extreme Heat Watch"}
+
+          def handler(event, context):
+              url = "https://api.weather.gov/alerts/active?zone=" + os.environ["NWS_ZONE"]
+              req = urllib.request.Request(url, headers={"User-Agent": "HeatCheck heat-safety prototype",
+                                                         "Accept": "application/geo+json"})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  feats = json.loads(r.read()).get("features", [])
+              heat = [f["properties"] for f in feats if f["properties"].get("event") in HEAT_EVENTS]
+              if not heat:
+                  print(json.dumps({"zone": os.environ["NWS_ZONE"], "active_heat_alerts": 0}))
+                  return {"heat_run": False}
+              a = heat[0]
+              body = {"alert_id": a.get("id"), "alert_type": "NWS " + a.get("event", "heat alert"),
+                      "headline": a.get("headline"), "high_f": 110}
+              req = urllib.request.Request(os.environ["VOICE_URL"].rstrip("/") + "/internal/heat-run",
+                                           data=json.dumps(body).encode(), method="POST",
+                                           headers={"Content-Type": "application/json",
+                                                    "X-Internal-Token": os.environ["INTERNAL_TOKEN"]})
+              with urllib.request.urlopen(req, timeout=25) as r:
+                  out = json.loads(r.read() or b"{}")
+              print(json.dumps({"alert": body, "result": out})[:1000])
+              return {"heat_run": True, "result": out}
+
+  SfnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{ Effect: Allow, Principal: { Service: states.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: invoke-actions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: [{ Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt ActionsFn.Arn }]
+
+  Ladder:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: hcs-escalation
+      RoleArn: !GetAtt SfnRole.Arn
+      DefinitionSubstitutions: { ActionsFn: !GetAtt ActionsFn.Arn }
+      Definition:
+        Comment: "HeatCheck escalation ladder: alert one contact per rung, wait, place a follow-up call, decide from the result."
+        StartAt: AlertContact
+        States:
+          AlertContact:
+            Type: Task
+            Comment: Call the contact on this rung (family, then caseworker; supervisor, then backup)
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: "${ActionsFn}"
+              Payload:
+                action: notify
+                person_id.$: $.person_id
+                checkin_id.$: $.checkin_id
+                step.$: $.step
+                level.$: $.level
+                reasons.$: $.reasons
+                findings.$: $.findings
+            ResultSelector:
+              notified.$: $.Payload.notified
+              has_next_rung.$: $.Payload.has_next_rung
+              next_contact.$: $.Payload.next_contact
+            ResultPath: $.alert
+            Retry: [{ ErrorEquals: [States.ALL], IntervalSeconds: 3, MaxAttempts: 2, BackoffRate: 2 }]
+            Next: MoreRungs
+          MoreRungs:
+            Type: Choice
+            Choices: [{ Variable: $.alert.has_next_rung, BooleanEquals: true, Next: WaitBeforeFollowUp }]
+            Default: LeaveForHuman
+          WaitBeforeFollowUp:
+            Type: Wait
+            Comment: 30 minutes in production (compressed for the demo)
+            SecondsPath: $.wait_seconds
+            Next: FollowUpCall
+          FollowUpCall:
+            Type: Task
+            Comment: Place a follow-up call; the voice service returns the result with the task token when it ends
+            Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
+            Parameters:
+              FunctionName: "${ActionsFn}"
+              Payload:
+                action: followup
+                person_id.$: $.person_id
+                task_token.$: $$.Task.Token
+            TimeoutSeconds: 900
+            ResultPath: $.followup
+            Catch: [{ ErrorEquals: [States.ALL], ResultPath: $.error, Next: TreatAsNoAnswer }]
+            Next: StillAtRisk
+          TreatAsNoAnswer:
+            Type: Pass
+            Result: { level: no_answer, reasons: [follow-up call did not complete] }
+            ResultPath: $.followup
+            Next: StillAtRisk
+          StillAtRisk:
+            Type: Choice
+            Choices:
+              - { Variable: $.followup.level, StringEquals: clear, Next: Resolved }
+              - { Variable: $.followup.level, StringEquals: emergency, Next: EmergencyHandledLive }
+            Default: NextRung
+          NextRung:
+            Type: Pass
+            Parameters:
+              person_id.$: $.person_id
+              person_name.$: $.person_name
+              checkin_id.$: $.checkin_id
+              level.$: $.followup.level
+              reasons.$: $.followup.reasons
+              findings: ""
+              wait_seconds.$: $.wait_seconds
+              step.$: States.MathAdd($.step, 1)
+            Next: AlertContact
+          Resolved:
+            Type: Succeed
+            Comment: Follow-up call was all clear
+          EmergencyHandledLive:
+            Type: Succeed
+            Comment: Heat-stroke signs; every contact was alerted during the call
+          LeaveForHuman:
+            Type: Succeed
+            Comment: Every contact has been alerted; the open alert stays on the dashboard for a person
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{ Effect: Allow, Principal: { Service: scheduler.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: invoke-risk-engine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: [{ Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt RiskEngineFn.Arn }]
+
+  NwsPoll:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: hcs-nws-heat-poll
+      Description: Every 30 minutes, check NWS heat alerts for Maricopa County
+      ScheduleExpression: rate(30 minutes)
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target: { Arn: !GetAtt RiskEngineFn.Arn, RoleArn: !GetAtt SchedulerRole.Arn }
+
+Outputs:
+  StateMachineArn: { Value: !Ref Ladder }
