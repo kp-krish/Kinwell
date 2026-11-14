@@ -64,14 +64,45 @@ def evaluate(person: dict, checkin: dict) -> dict:
     return {"level": "warning" if reasons else "clear", "reasons": reasons}
 
 
-def _alert_message(person: dict, reason: str, emergency: bool) -> str:
+def _join(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + ", and " + items[-1]
+
+
+def spoken_findings(person: dict, checkin: dict) -> str:
+    """Turn recorded facts into a sentence that sounds natural when read aloud."""
+    who = person.get("first_name") or "they"
+    is_, has = ("are", "have") if who == "they" else ("is", "has")
+    parts = []
+    if checkin.get("ac_working") == "no":
+        parts.append("the air conditioning is not working")
+    syms = [s.lower().strip() for s in checkin.get("symptoms") or []]
+    if syms:
+        parts.append(f"{who} {is_} feeling " + _join(syms).replace("dizziness", "dizzy"))
+    if checkin.get("water") == "no":
+        parts.append(f"{who} {has} not been drinking water")
+    if person.get("playbook") == "crew" and checkin.get("rest_break") == "no":
+        parts.append(f"{who} {has} not had a shade or rest break")
+    if checkin.get("coworker_concern") == "yes":
+        parts.append("a coworker may be unwell")
+    return _join(parts)
+
+
+def _alert_message(person: dict, reason: str, emergency: bool, findings: str = "") -> str:
     name = person.get("name", "the person")
+    first = person.get("first_name") or name
     if emergency:
-        return (f"This is an urgent automated HeatCheck alert. During a heat check-in call, {name} "
-                f"showed possible heat-stroke signs: {reason}. They were told to call 911. "
-                f"Please check on {name} immediately.")
-    return (f"This is an automated HeatCheck alert about {name}. During today's heat check-in: {reason}. "
-            f"Please check on them. A follow-up call is scheduled.")
+        return (f"This is an urgent automated alert from HeatCheck. During a heat check-in call just now, "
+                f"{name} showed possible signs of heat stroke: {reason}. {first} was told to call 9 1 1. "
+                f"Please check on {first} right away.")
+    if findings:
+        what = f"On today's heat check-in call, {first} told us that {findings}."
+    else:
+        what = f"Today's heat check-in found that {reason}."
+    return (f"Hello, this is an automated alert from HeatCheck about {name}. {what} "
+            f"Please check on {first} soon.")
 
 
 async def _write_alert(person: dict, checkin_id: str | None, level: str, reason: str, notified: list[str]) -> str:
@@ -83,7 +114,8 @@ async def _write_alert(person: dict, checkin_id: str | None, level: str, reason:
     })
 
 
-async def escalate_now(person: dict, checkin_id: str | None, reason: str, emergency: bool) -> None:
+async def escalate_now(person: dict, checkin_id: str | None, reason: str, emergency: bool,
+                       findings: str = "") -> None:
     """Emergency: call every escalation contact now. Warning: call the next contact on the ladder."""
     if emergency:
         targets = await contacts_for(person)
@@ -93,7 +125,7 @@ async def escalate_now(person: dict, checkin_id: str | None, reason: str, emerge
     notified = []
     for c in targets:
         try:
-            await twilio_api.notify_by_voice(c["phone"], _alert_message(person, reason, emergency))
+            await twilio_api.notify_by_voice(c["phone"], _alert_message(person, reason, emergency, findings))
             notified.append(f"{c['name']} ({c['role']})")
         except Exception:
             log.exception("notify %s failed", c.get("name"))
@@ -113,7 +145,8 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
     elif result["level"] == "warning":
         ladder_len = len(await contacts_for(person))
         step = await _warning_alerts_today(person)
-        await escalate_now(person, checkin_id, "; ".join(result["reasons"]), emergency=False)
+        await escalate_now(person, checkin_id, "; ".join(result["reasons"]), emergency=False,
+                           findings=spoken_findings(person, checkin))
         # Book one follow-up per ladder rung; once every contact has been alerted,
         # stop calling and leave the open alert for a human on the dashboard.
         if not callback_booked and step + 1 < max(ladder_len, 1):
@@ -140,5 +173,6 @@ async def on_no_answer(person: dict, checkin_id: str, attempt: int) -> None:
         await scheduler.schedule_checkin(person["_id"], pb["retry_minutes"], "retry after no answer",
                                          attempt=attempt + 1)
     else:
+        first = person.get("first_name") or person.get("name", "they")
         await escalate_now(person, checkin_id,
-                           f"did not answer {attempt + 1} check-in calls", emergency=False)
+                           f"{first} did not answer {attempt + 1} check-in calls in a row", emergency=False)
