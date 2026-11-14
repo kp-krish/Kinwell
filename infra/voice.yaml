@@ -147,6 +147,7 @@ Resources:
             - { Name: NOVA_REGION, Value: us-west-2 }
             - { Name: INFRA_REGION, Value: !Ref AWS::Region }
             - { Name: DEMO_SECONDS_PER_MINUTE, Value: !Ref DemoSecondsPerMinute }
+            - { Name: CREW_IGNORE_SHIFT_HOURS, Value: "1" }
             - { Name: STATE_MACHINE_ARN, Value: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:hcs-escalation" }
           Secrets:
             - { Name: TWILIO_ACCOUNT_SID, ValueFrom: !Sub "${SecretArn}:TWILIO_ACCOUNT_SID::" }

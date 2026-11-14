@@ -377,6 +377,22 @@ async def api_simulate(payload: dict | None = None):
     return {"calls": placed, "scout": scout}
 
 
+@app.post("/api/crews/{crew_id}/start-shift")
+async def api_start_shift(crew_id: str, x_api_key: str | None = Header(None)):
+    """Crew Check: call every opted-in worker on this crew now; later check-ins follow the crew interval."""
+    require_dashboard(x_api_key)
+    store = get_store()
+    workers = [r for r in await store.find("residents", {"crew_id": crew_id}) if r.get("phone") and not r.get("demo")]
+    out = []
+    for w in workers:
+        try:
+            out.append({w["_id"]: await place_call(w["_id"], reason="crew shift check-in",
+                                                   context={"high_f": 112, "alert_type": "NWS Extreme Heat Warning"})})
+        except HTTPException as e:
+            out.append({w["_id"]: {"error": e.detail}})
+    return {"calls": out}
+
+
 @app.post("/api/scout/refresh")
 async def api_scout_refresh(x_api_key: str | None = Header(None)):
     require_dashboard(x_api_key)

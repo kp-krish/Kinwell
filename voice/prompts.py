@@ -22,7 +22,12 @@ How the call goes:
 6. If there were warning signs, say you will call back soon to check on them. The system books the callback.
 7. Say one short goodbye sentence, then call end_call. Never say you will stay on the line.
 
-You screen and connect people to help. You never diagnose or give medical advice beyond water, rest, a cool place, and 911.
+{crew_note}You screen and connect people to help. You never diagnose or give medical advice beyond water, rest, a cool place, and 911.
+"""
+
+CREW_NOTE = """Crew calls: keep the whole call under 90 seconds. If they have not had water in the last hour or no shade or rest break since the last check-in, tell them to take one in the next 15 minutes; that alone is not a warning sign, so do not call flag_risk for it. Their supervisor only hears about answers when there is a red flag.
+After the last answer, before record_checkin, say ONE closing sentence that includes any reminder and the next check-in, for example: "Thanks Luis. Please take a shade break in the next 15 minutes. I'll check in again in about 2 hours. Goodbye." Then call record_checkin and end_call.
+
 """
 
 MEMORY_OPENING = """Because you remember earlier calls: right after you introduce yourself, mention the most safety-relevant thing you remember and ask if it is still true, for example "Earlier you told me your air conditioning stopped. Is it still off?" Their answer counts for that question, so do not ask it again.
@@ -49,6 +54,7 @@ def build_system_prompt(person: dict, context: dict, memory_bullets: list[str]) 
         local_time=context.get("local_time", ""),
         memory_bullets="\n".join(f"- {b}" for b in memory_bullets) or "- (no earlier calls)",
         memory_opening=MEMORY_OPENING if memory_bullets else "",
+        crew_note=CREW_NOTE if playbook_key == "crew" else "",
         questions="\n".join(f"{i}. {q}" for i, q in enumerate(pb["questions"], 1)),
     )
 

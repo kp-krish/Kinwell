@@ -5,6 +5,7 @@ The model never decides who gets alerted; it only reports facts via tools.
 from __future__ import annotations
 
 import logging
+import os
 
 from . import escalation, scheduler, twilio_api
 from .playbooks import PLAYBOOKS
@@ -51,10 +52,11 @@ def evaluate(person: dict, checkin: dict) -> dict:
     flag_reasons = [f["reason"] for f in flags if f.get("level") == "warning"]
     if checkin.get("ac_working") == "no":
         reasons.append("AC not working")
-    if checkin.get("water") == "no":
+    crew = person.get("playbook") == "crew"
+    # Crews: a single missed water/shade break gets a reminder on the call, not a supervisor alert
+    # (worker privacy); two in a row is handled by _crew_consecutive_check.
+    if checkin.get("water") == "no" and not crew:
         reasons.append("no water")
-    if person.get("playbook") == "crew" and checkin.get("rest_break") == "no":
-        reasons.append("no shade or rest break")
     if checkin.get("coworker_concern") == "yes":
         reasons.append("coworker may be unwell")
     syms = [s.lower() for s in checkin.get("symptoms") or []]
@@ -177,7 +179,23 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
         await store.update("checkins", checkin_id, {"ladder_step": step + 1})
     elif person.get("playbook") == "crew":
         await _crew_consecutive_check(person)
+    if person.get("playbook") == "crew":
+        await _schedule_next_crew_checkin(person)
     return result
+
+
+async def _schedule_next_crew_checkin(person: dict) -> None:
+    """Crew Check: next check-in after the crew's interval, while the shift is still on."""
+    import datetime as dt
+    crew = await get_store().get("crews", person.get("crew_id", "")) if person.get("crew_id") else None
+    if not crew:
+        return
+    phx = dt.timezone(dt.timedelta(hours=-7))
+    local = now().astimezone(phx)
+    end_h, end_m = (int(x) for x in crew.get("shift_end", "15:00").split(":"))
+    interval = int(crew.get("interval_min", 120))
+    if os.environ.get("CREW_IGNORE_SHIFT_HOURS") or             (local + dt.timedelta(minutes=interval)).time() <= dt.time(end_h, end_m):
+        await scheduler.schedule_checkin(person["_id"], interval, "crew shift check-in")
 
 
 async def _crew_consecutive_check(person: dict) -> None:
@@ -185,7 +203,9 @@ async def _crew_consecutive_check(person: dict) -> None:
     rows = await get_store().find("checkins", {"resident_id": person["_id"], "call_status": "completed"},
                                   sort="started_at", limit=2)
     if len(rows) == 2 and all(r.get("water") == "no" or r.get("rest_break") == "no" for r in rows):
-        await escalate_now(person, rows[0]["_id"], "two check-ins in a row without water or rest", emergency=False)
+        first = person.get("first_name") or person.get("name")
+        await escalate_now(person, rows[0]["_id"], f"{first} went two check-ins in a row without water or a shade break",
+                           emergency=False)
 
 
 async def on_no_answer(person: dict, checkin_id: str, attempt: int, why: str = "no answer") -> None:

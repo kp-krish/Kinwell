@@ -104,6 +104,12 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
 
     if name == "flag_risk":
         level = args.get("level", "warning")
+        reason_l = (args.get("reason") or "").lower()
+        if (person.get("playbook") == "crew" and level == "warning"
+                and any(w in reason_l for w in ("water", "rest", "shade", "break", "hydrat"))):
+            # Crew privacy rule (in code): one missed water/shade break is a reminder, not a supervisor alert.
+            return {"flagged": False, "action": "Not a warning for crews. Remind them to take a shade break and "
+                                                "drink water in the next 15 minutes. The supervisor is NOT alerted."}
         flag = {"level": level, "reason": args.get("reason", ""), "at": now()}
         ctx.flags.append(flag)
         await store.update("checkins", ctx.checkin_id, {"flags": ctx.flags})
