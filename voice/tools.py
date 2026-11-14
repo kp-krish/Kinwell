@@ -144,7 +144,12 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
 
     if name == "schedule_callback":
         minutes = max(10, min(int(args.get("minutes") or 30), 120))
-        when = await scheduler.schedule_checkin(person["_id"], minutes, args.get("reason", "follow-up"))
+        from . import escalation
+        if escalation.enabled():
+            # The Step Functions ladder owns warning follow-ups; only record what was promised.
+            when = now() + dt.timedelta(minutes=minutes)
+        else:
+            when = await scheduler.schedule_checkin(person["_id"], minutes, args.get("reason", "follow-up"))
         ctx.callback_booked = True
         await store.update("checkins", ctx.checkin_id, {"callback_at": when})
         return {"scheduled": True, "minutes": minutes}

@@ -129,6 +129,8 @@ def get_store():
 
 
 async def calls_today(person_id: str) -> int:
-    start = now().replace(hour=0, minute=0, second=0, microsecond=0)
+    """Calls placed today (Phoenix calendar day; Arizona has no DST) for the daily cap."""
+    phx = dt.timezone(dt.timedelta(hours=-7))
+    start = now().astimezone(phx).replace(hour=0, minute=0, second=0, microsecond=0)
     rows = await get_store().find("checkins", {"resident_id": person_id})
     return sum(1 for r in rows if r.get("started_at") and r["started_at"] >= start)

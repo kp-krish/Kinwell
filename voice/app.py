@@ -52,9 +52,22 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         raise HTTPException(404, f"unknown person {person_id}")
     if not person.get("phone"):
         raise HTTPException(400, f"{person_id} has no phone number")
+    # Never ring someone who is already on (or being dialed for) a check-in call.
+    recent = now() - dt.timedelta(minutes=10)
+    active = [c for c in await store.find("checkins", {"resident_id": person_id}, sort="started_at", limit=5)
+              if c.get("call_status") in ("dialing", "in_progress") and c.get("started_at") and c["started_at"] >= recent]
+    if active:
+        if task_token:
+            # A ladder follow-up while a call is live: that call's result answers the ladder.
+            await store.update("checkins", active[0]["_id"], {"task_token": task_token})
+            log.info("follow-up attached to active call %s for %s", active[0]["_id"], person_id)
+            return {"attached": active[0]["_id"]}
+        log.info("skip call to %s: call already in progress", person_id)
+        return {"skipped": "call already in progress"}
     if await calls_today(person_id) >= config.DAILY_CALL_CAP:
         log.warning("daily call cap reached for %s", person_id)
         return {"skipped": "daily call cap reached"}
+    scheduler.cancel(person_id)  # this call replaces any pending retry/callback
 
     checkin_id = await store.insert("checkins", {
         "resident_id": person_id, "resident_name": person.get("name"),
