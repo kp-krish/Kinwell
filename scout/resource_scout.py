@@ -37,7 +37,7 @@ SOURCES = json.loads((pathlib.Path(__file__).parent / "sources.json").read_text(
 SITE_SCHEMA = {
     "type": "object",
     "properties": {
-        "status": {"type": "string", "description": "ok or failed"},
+        "status": {"type": "string"},
         "reason": {"type": "string"},
         "sites": {"type": "array", "items": {"type": "object", "properties": {
             "name": {"type": "string"},
@@ -45,7 +45,7 @@ SITE_SCHEMA = {
             "city": {"type": "string"},
             "hours_today": {"type": "string"},
             "open_today": {"type": "boolean"},
-            "notes": {"type": "string", "description": "accessibility, pets, water, etc. Empty if none."},
+            "notes": {"type": "string"},
         }, "required": ["name", "street_address", "city", "hours_today", "open_today"]}},
     },
     "required": ["status", "sites"],
