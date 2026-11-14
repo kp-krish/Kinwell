@@ -41,7 +41,7 @@ def _first(*names: str) -> str:
 MONGODB_URI = _mongo_uri()
 GEMINI_API_KEY = _first("GEMINI_API_KEY", "GEMINI_API")
 SUPERMEMORY_API_KEY = _first("SUPERMEMORY_API_KEY", "SUPERMEMORY_API")
-TINYFISH_API_KEY = _first("TINYFISH_API_KEY", "TINYFISH_API")
+TINYFISH_API_KEY = _first("TINYFISH_API_KEY", "TINYFISH_API", "TINY_FISH_API")
 
 # Safety: max outbound calls per person per day (runaway protection).
 DAILY_CALL_CAP = int(os.environ.get("DAILY_CALL_CAP", "6"))

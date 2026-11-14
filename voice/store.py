@@ -102,17 +102,20 @@ class MongoStore:
         await self._run(self.mdb[coll].update_one, {"_id": _id}, {"$set": fields})
 
     async def nearest_resource(self, lng, lat, rtype, max_m=15000):
-        def q():
+        """Nearest open resource via $geoNear on the 2dsphere index.
+        Prefers live Resource Scout records; falls back to seed records."""
+        def q(extra):
             pipeline = [
                 {"$geoNear": {
                     "near": {"type": "Point", "coordinates": [lng, lat]},
                     "distanceField": "distance_m", "maxDistance": max_m, "spherical": True,
-                    "query": {"type": rtype, "open_today": True}}},
+                    "query": {"type": rtype, "open_today": True, **extra}}},
                 {"$limit": 1},
             ]
             res = list(self.mdb.resources.aggregate(pipeline))
             return res[0] if res else None
-        return await self._run(q)
+        live = await self._run(q, {"source_url": {"$ne": "seed"}})
+        return live or await self._run(q, {})
 
 
 _store = None

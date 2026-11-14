@@ -1,0 +1,20 @@
+[
+  {
+    "name": "phoenix_libraries",
+    "url": "https://www.phoenixpubliclibrary.org/locations",
+    "goal": "List every Phoenix Public Library branch on this site. Libraries serve as public cooling spots.",
+    "default_city": "Phoenix",
+    "resource_type": "cooling_center",
+    "max_sites": 17,
+    "max_seconds": 240
+  },
+  {
+    "name": "tempe_library",
+    "url": "https://www.tempe.gov/government/community-services/tempe-public-library",
+    "goal": "Find the Tempe Public Library and its hours. Libraries serve as public cooling spots.",
+    "default_city": "Tempe",
+    "resource_type": "cooling_center",
+    "max_sites": 3,
+    "max_seconds": 150
+  }
+]

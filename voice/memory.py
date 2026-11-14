@@ -26,7 +26,9 @@ def _tag(person_id: str) -> str:
 async def recall(person: dict, limit: int = 5) -> list[str]:
     if config.SUPERMEMORY_API_KEY:
         try:
-            return await _sm_search(person["_id"], limit)
+            hits = await _sm_search(person["_id"], limit)
+            if hits:
+                return hits
         except Exception:
             log.exception("supermemory search failed; using local fallback")
     return await _local_recall(person, limit)
@@ -72,25 +74,37 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {config.SUPERMEMORY_API_KEY}", "Content-Type": "application/json"}
 
 
+def _text_of(item: dict) -> str:
+    for key in ("memory", "chunk", "content"):
+        v = item.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if isinstance(v, dict):
+            for k2 in ("memory", "content", "text"):
+                if isinstance(v.get(k2), str) and v[k2].strip():
+                    return v[k2].strip()
+    return ""
+
+
 async def _sm_search(person_id: str, limit: int) -> list[str]:
-    body = {"q": "AC status, health symptoms, who was notified, recent heat check-ins",
-            "containerTags": [_tag(person_id)], "limit": limit}
+    """Supermemory API v5: namespace in the path, one namespace per person."""
+    body = {"query": "air conditioning status, heat symptoms, who was notified, recent heat check-ins",
+            "limit": limit, "searchMode": "hybrid"}
     async with httpx.AsyncClient(timeout=6) as c:
-        r = await c.post(f"{SM_BASE}/v3/search", json=body, headers=_headers())
+        r = await c.post(f"{SM_BASE}/ns/{_tag(person_id)}/search", json=body, headers=_headers())
         r.raise_for_status()
         data = r.json()
-    out = []
-    for item in data.get("results", [])[:limit]:
-        text = item.get("memory") or item.get("content") or ""
-        if not text and item.get("chunks"):
-            text = item["chunks"][0].get("content", "")
-        if text:
-            out.append(text.strip())
-    return out
+    out: list[str] = []
+    for item in data.get("results", []):
+        text = _text_of(item)
+        if text and text not in out:
+            out.append(text)
+    return out[:limit]
 
 
 async def _sm_add(person_id: str, summary: str) -> None:
-    body = {"content": summary, "containerTags": [_tag(person_id)]}
+    body = {"content": summary, "dreaming": "instant"}
     async with httpx.AsyncClient(timeout=10) as c:
-        r = await c.post(f"{SM_BASE}/v3/documents", json=body, headers=_headers())
+        r = await c.post(f"{SM_BASE}/ns/{_tag(person_id)}/document", json=body, headers=_headers())
         r.raise_for_status()
+        log.info("supermemory saved for %s: %s", person_id, r.json().get("status"))

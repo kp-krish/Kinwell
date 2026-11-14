@@ -202,7 +202,9 @@ async def post_call(ctx: CallContext, transcript: list[dict]) -> None:
         note = await notes.case_note(ctx.person, transcript, result)
         if note:
             await store.update("checkins", ctx.checkin_id, {"case_note": note})
-            await memory.remember(ctx.person, note.get("memory_summary", ""))
+            stamp = ended.astimezone(PHX).strftime("%b %d, %I:%M %p").replace(" 0", " ")
+            if note.get("memory_summary"):
+                await memory.remember(ctx.person, f"{stamp} check-in: {note['memory_summary']}")
     except Exception:
         log.exception("case note failed")
 
@@ -217,6 +219,18 @@ def _jsonable(doc):
     if isinstance(doc, dt.datetime):
         return doc.isoformat()
     return doc
+
+
+@app.get("/api/briefing")
+async def api_briefing():
+    """Gemini-ranked list of who needs a human call, from today's check-ins."""
+    from . import notes
+    start = now().replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = [c for c in await get_store().find("checkins", sort="started_at", limit=500)
+            if c.get("started_at") and c["started_at"] >= start]
+    if not rows:
+        return {"headline": "No check-ins yet today.", "items": [], "calls": 0}
+    return JSONResponse(_jsonable(await notes.briefing(rows)))
 
 
 @app.get("/api/state")
