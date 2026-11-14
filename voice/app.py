@@ -222,6 +222,8 @@ def _jsonable(doc):
         return {k: _jsonable(v) for k, v in doc.items()}
     if isinstance(doc, dt.datetime):
         return doc.isoformat()
+    if type(doc).__name__ == "ObjectId":
+        return str(doc)
     return doc
 
 
