@@ -137,6 +137,11 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
     """Apply rules once the call has ended and the tools have written the facts."""
     store = get_store()
     checkin = await store.get("checkins", checkin_id) or {}
+    has_facts = "water" in checkin or "symptoms" in checkin or checkin.get("flags")
+    if not has_facts:
+        # No answers were recorded (voicemail, dropped call, hung up early). Unconfirmed is never "safe".
+        await on_no_answer(person, checkin_id, checkin.get("attempt", 0), why="call ended before check-in answers")
+        return {"level": "no_answer", "reasons": ["call ended before check-in answers"]}
     result = evaluate(person, checkin)
     await store.update("checkins", checkin_id, {"risk_level": result["level"], "risk_reasons": result["reasons"]})
 
@@ -165,10 +170,12 @@ async def _crew_consecutive_check(person: dict) -> None:
         await escalate_now(person, rows[0]["_id"], "two check-ins in a row without water or rest", emergency=False)
 
 
-async def on_no_answer(person: dict, checkin_id: str, attempt: int) -> None:
-    """Missed call: retry per playbook, then walk the escalation ladder."""
+async def on_no_answer(person: dict, checkin_id: str, attempt: int, why: str = "no answer") -> None:
+    """Missed call (no answer, busy, voicemail, or ended before answers): retry per playbook,
+    then walk the escalation ladder. Never treated as safe."""
     pb = PLAYBOOKS[person.get("playbook", "resident")]
-    await get_store().update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer"})
+    await get_store().update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer",
+                                                      "risk_reasons": [why]})
     if attempt < pb["max_retries"]:
         await scheduler.schedule_checkin(person["_id"], pb["retry_minutes"], "retry after no answer",
                                          attempt=attempt + 1)

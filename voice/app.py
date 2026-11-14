@@ -66,6 +66,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         person["phone"],
         url=f"https://{base}/twilio/voice?checkin_id={checkin_id}",
         status_callback=f"https://{base}/twilio/status?checkin_id={checkin_id}",
+        detect_machine=True,
     )
     await store.update("checkins", checkin_id, {"call_sid": res.get("sid")})
     log.info("dialing %s checkin=%s sid=%s", person_id, checkin_id, res.get("sid"))
@@ -90,7 +91,18 @@ async def start_call(payload: dict):
 # ---------------------------------------------------------------- Twilio webhooks
 
 @app.post("/twilio/voice")
-async def twilio_voice(request: Request, checkin_id: str):
+async def twilio_voice(request: Request, checkin_id: str, AnsweredBy: str = Form("")):
+    if AnsweredBy.startswith("machine") or AnsweredBy == "fax":
+        # Voicemail is not a check-in: hang up and treat it as no answer (retry, then escalate).
+        store = get_store()
+        checkin = await store.get("checkins", checkin_id)
+        log.info("voicemail detected checkin=%s answered_by=%s", checkin_id, AnsweredBy)
+        if checkin:
+            await store.update("checkins", checkin_id, {"answered_by": AnsweredBy})
+            person = await store.get("residents", checkin["resident_id"])
+            asyncio.create_task(rules.on_no_answer(person, checkin_id, checkin.get("attempt", 0),
+                                                   why="reached voicemail"))
+        return Response(content="<Response><Hangup/></Response>", media_type="application/xml")
     ws_url = f"wss://{public_base(request)}/twilio/stream"
     twiml = (
         "<Response><Connect>"

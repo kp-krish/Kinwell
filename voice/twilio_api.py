@@ -20,8 +20,13 @@ def _auth() -> tuple[str, str]:
 
 
 async def create_call(to: str, *, url: str | None = None, twiml: str | None = None,
-                      status_callback: str | None = None, timeout_s: int = 25) -> dict:
+                      status_callback: str | None = None, timeout_s: int = 25,
+                      detect_machine: bool = False) -> dict:
     data = {"To": to, "From": config.TWILIO_PHONE_NUMBER, "Timeout": str(timeout_s)}
+    if detect_machine:
+        # Twilio answering-machine detection: AnsweredBy is passed to the voice webhook.
+        data["MachineDetection"] = "Enable"
+        data["MachineDetectionTimeout"] = "8"
     if url:
         data["Url"] = url
     if twiml:
