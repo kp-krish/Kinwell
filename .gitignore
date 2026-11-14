@@ -24,3 +24,5 @@ cdk.out/
 Thumbs.db
 .vscode/
 .idea/
+
+scout/maritime_agent.json

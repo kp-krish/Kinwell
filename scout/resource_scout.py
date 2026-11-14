@@ -23,8 +23,33 @@ import time
 import httpx
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-from voice import config  # noqa: E402
+try:  # local dev: reuse the repo .env; on Maritime, env vars are injected
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
+
+def _env(*names: str) -> str:
+    for n in names:
+        if os.environ.get(n):
+            return os.environ[n]
+    return ""
+
+
+def _mongo_uri() -> str:
+    from urllib.parse import quote_plus
+    uri = _env("MONGODB_URI")
+    user, pw = _env("MONGODB_USER"), _env("MONGODB_PASSWORD")
+    if user:
+        uri = uri.replace("<db_username>", quote_plus(user))
+    if pw:
+        uri = uri.replace("<db_password>", quote_plus(pw))
+    return uri
+
+
+TINYFISH_API_KEY = _env("TINYFISH_API_KEY", "TINYFISH_API", "TINY_FISH_API")
+MONGODB_URI = _mongo_uri()
 
 log = logging.getLogger("scout")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -64,7 +89,7 @@ def goal_for(source: dict, today: dt.datetime) -> str:
 def run_tinyfish(source: dict, today: dt.datetime, progress) -> dict:
     body = {"url": source["url"], "goal": goal_for(source, today), "output_schema": SITE_SCHEMA,
             "agent_config": {"max_duration_seconds": source.get("max_seconds", 240)}}
-    headers = {"X-API-Key": config.TINYFISH_API_KEY, "Content-Type": "application/json"}
+    headers = {"X-API-Key": TINYFISH_API_KEY, "Content-Type": "application/json"}
     with httpx.stream("POST", TF_URL, json=body, headers=headers, timeout=360) as r:
         if r.status_code >= 300:
             r.read()
@@ -92,17 +117,46 @@ def normalize_hours(h: str) -> str:
     return re.sub(r"\s+", " ", h)
 
 
-def geocode(client, address: str) -> tuple[float, float] | None:
+def _addr_key(address: str) -> str:
+    """Street + city, ignoring punctuation, state and ZIP, so format changes still hit the cache."""
+    words = re.sub(r"[^a-z0-9]+", " ", address.lower()).split()
+    words = [w for w in words if w not in ("az", "arizona", "usa") and not re.fullmatch(r"\d{5}", w)]
+    return " ".join(dict.fromkeys(words))
+
+
+def geocode(db, client, address: str) -> tuple[float, float] | None:
+    """Atlas geocache first (addresses rarely move); Amazon Location only when
+    AWS credentials are present. Without them, the record is saved as pending
+    and the AWS side backfills it."""
+    key = _addr_key(address)
+    hit = db.geocache.find_one({"_id": key})
+    if hit:
+        return tuple(hit["coordinates"])
+    if client is None:
+        return None
     try:
         res = client.geocode(QueryText=address, MaxResults=1,
                              Filter={"IncludeCountries": ["USA"]}, BiasPosition=[-112.074, 33.448])
         items = res.get("ResultItems") or []
         if items:
             lng, lat = items[0]["Position"]
+            db.geocache.replace_one({"_id": key}, {"_id": key, "address": address, "coordinates": [lng, lat]},
+                                    upsert=True)
             return lng, lat
     except Exception as e:
         log.warning("geocode failed for %s: %s", address, e)
     return None
+
+
+def _geo_client():
+    try:
+        import boto3
+        session = boto3.Session()
+        if session.get_credentials() is None:
+            return None
+        return session.client("geo-places", region_name=GEO_REGION)
+    except Exception:
+        return None
 
 
 def site_id(source_name: str, name: str) -> str:
@@ -110,11 +164,10 @@ def site_id(source_name: str, name: str) -> str:
 
 
 def scout(source_names: list[str] | None = None) -> dict:
-    import boto3
     from pymongo import MongoClient
 
-    db = MongoClient(config.MONGODB_URI, tz_aware=True).heatcheck
-    geo = boto3.client("geo-places", region_name=GEO_REGION)
+    db = MongoClient(MONGODB_URI, tz_aware=True).heatcheck
+    geo = _geo_client()
     today = dt.datetime.now(PHX)
     sources = [s for s in SOURCES if not source_names or s["name"] in source_names]
     summary = {"sources": [], "upserted": 0}
@@ -138,20 +191,27 @@ def scout(source_names: list[str] | None = None) -> dict:
             fetched = dt.datetime.now(dt.timezone.utc)
             n = 0
             for s in sites:
-                address = f"{s['street_address']}, {s.get('city') or src.get('default_city', '')}, AZ"
-                address = re.sub(r",\s*(\d{5})\s*,", r", \1,", address)
-                pos = geocode(geo, address)
-                if not pos:
-                    continue
+                street = s["street_address"].strip().rstrip(".")
+                city = (s.get("city") or src.get("default_city", "")).strip()
+                if re.search(r"\bAZ\b", street):
+                    address = street
+                else:
+                    zipm = re.search(r",?\s*(\d{5})$", street)
+                    street = street[:zipm.start()] if zipm else street
+                    address = f"{street}, {city}, AZ" + (f" {zipm.group(1)}" if zipm else "")
+                pos = geocode(db, geo, address)
                 doc = {
                     "type": src.get("resource_type", "cooling_center"),
                     "name": s["name"].strip(), "address": address,
-                    "location": {"type": "Point", "coordinates": list(pos)},
                     "hours_today": normalize_hours(s.get("hours_today", "")),
                     "open_today": bool(s.get("open_today")),
                     "notes": (s.get("notes") or "").strip(),
                     "source": src["name"], "source_url": src["url"], "fetched_at": fetched,
                 }
+                if pos:
+                    doc["location"] = {"type": "Point", "coordinates": list(pos)}
+                else:
+                    doc["pending_geocode"] = True
                 db.resources.replace_one({"_id": site_id(src["name"], s["name"])},
                                          {"_id": site_id(src["name"], s["name"]), **doc}, upsert=True)
                 n += 1
