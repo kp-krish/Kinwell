@@ -67,6 +67,7 @@ export const api = {
   simulate: () => j<{ calls: unknown[]; scout: unknown }>("/api/simulate-heat-warning", { method: "POST", body: "{}" }),
   call: (person_id: string) => j("/calls", { method: "POST", body: JSON.stringify({ person_id, reason: "dashboard" }) }),
   refreshScout: () => j("/api/scout/refresh", { method: "POST", body: "{}" }),
+  startShift: (crewId: string) => j(`/api/crews/${crewId}/start-shift`, { method: "POST", body: "{}" }),
 };
 
 export function ago(iso?: string, now = Date.now()): string {

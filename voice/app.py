@@ -330,6 +330,11 @@ async def api_state():
     resources = await store.find("resources")
     crews = await store.find("crews")
     runs = await store.find("scout_runs", sort="started_at", limit=5)
+    # Simulator test people (scripts/sim_call.py) stay out of the dashboard.
+    sim_ids = {r["_id"] for r in residents if r.get("sim")}
+    residents = [r for r in residents if r["_id"] not in sim_ids]
+    checkins = [c for c in checkins if c.get("resident_id") not in sim_ids]
+    alerts = [a for a in alerts if a.get("resident_id") not in sim_ids]
     for c in checkins:
         c.pop("transcript", None)
     return JSONResponse(_jsonable({"residents": residents, "checkins": checkins, "alerts": alerts,

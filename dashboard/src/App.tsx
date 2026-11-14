@@ -166,7 +166,8 @@ export default function App() {
                 onOpen={openCheckin} onCall={(id) => run("call" + id, () => api.call(id))} busy={busy} />
             ) : (
               <CrewView state={state} latest={latest} now={now} onOpen={openCheckin}
-                onCall={(id) => run("call" + id, () => api.call(id))} busy={busy} />
+                onCall={(id) => run("call" + id, () => api.call(id))} busy={busy}
+                onStartShift={(cid) => run("shift" + cid, () => api.startShift(cid))} />
             )}
           </Card>
 
@@ -254,8 +255,9 @@ function PeopleList({ people, latest, now, onOpen, onCall, busy }: {
   );
 }
 
-function CrewView({ state, latest, now, onOpen, onCall, busy }: {
+function CrewView({ state, latest, now, onOpen, onCall, busy, onStartShift }: {
   state: State | null; latest: Map<string, Checkin>; now: number; onOpen: (id: string) => void; onCall: (id: string) => void; busy: string | null;
+  onStartShift: (crewId: string) => void;
 }) {
   const crews = state?.crews || [];
   return (
@@ -269,6 +271,10 @@ function CrewView({ state, latest, now, onOpen, onCall, busy }: {
               <HardHat size={14} className="text-heat-600" /><b>{crew.employer}</b> · {crew.name}
               <span className="ml-auto text-xs text-stone-500">Shift {crew.shift_start}–{crew.shift_end}, every {crew.interval_min / 60} h</span>
             </div>
+            <button onClick={() => onStartShift(crew._id)}
+              className="mb-1 inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-stone-700">
+              {busy === "shift" + crew._id ? <Loader2 size={12} className="animate-spin" /> : <PhoneCall size={12} />} Start shift check-ins
+            </button>
             <PeopleList people={workers} latest={latest} now={now} onOpen={onOpen} onCall={onCall} busy={busy} />
             <div className="mt-1 text-xs font-medium text-stone-500">Shift log</div>
             <ul className="text-xs text-stone-600">
