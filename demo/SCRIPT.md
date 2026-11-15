@@ -30,8 +30,9 @@ it double-checks anything that doesn't look right."
 
 ## 3. Permission first (0:40 to 0:52)
 
-Visual: **YOU** phone screen showing the incoming call from "Kinwell", answered. If no footage, use a dark
-card with the two caption lines below, typed on.
+Audio: `call1_permission_mixed.mp3` (real call, 29 s; trim to the intro, the question and "yes").
+Visual: your dashboard screen recording `Kinwell Team - Google Chrome 2026-11-15 00-38-07.mp4`, or a dark card
+with the caption lines below typed on.
 
 CALL (captions):
 > "This is an automated call from Kinwell. Maria signed you up… Is it okay if we call you on those days?"
@@ -49,17 +50,24 @@ Kinwell's risk engine starts calls automatically."
 
 ## 5. The check-in call (1:02 to 1:38)
 
-Visual: **YOU** phone on speaker, with captions. Fallback: `dash_call_detail.mp4` 0:10 to 0:29 (the transcript
-scrolling), with the CALL lines read by two AI voices (agent and an older man).
+Audio: `call2_heat_checkin_take3_mixed.mp3` (real call, 54 s). Start at about 0:06 to skip the repeated
+greeting; tighten the pauses between turns. Separate voice tracks: `_ch1.wav` and `_ch2.wav`.
+Visual: your dashboard screen recording `Kinwell Team - Google Chrome 2026-11-15 00-59-19.mp4` (John moves to
+Need you), then `dash_call_detail.mp4` 0:10 to 0:29, with captions.
 
-CALL:
-> Agent: "Hello, this is Kinwell checking in on you, John. Is your air conditioning working right now?"
+CALL (what was said):
+> Agent: "Hi, it's Kinwell checking on you. Is your air conditioning working right now?"
 > John: "Yes, it's working."
 > Agent: "How hot does it feel inside your home?"
-> John: "About ninety-five degrees."
+> John: "I think it's about ninety-five degrees."
+> Agent: "Have you been drinking water today?" / John: "Yes."
 > Agent: "Are you feeling any dizziness, headache, nausea, or confusion?"
-> John: "A bit dizzy."
-> Agent: "I'll let your family know about the dizziness. The nearest cooling center is Tempe Public Library…"
+> John: "I feel a little dizzy."
+> Agent: "The nearest cooling center is Tempe Public Library, about 3 miles away. It is closed right now and
+> opens at 9 AM today. Until then, try staying in the coolest room, taking a cool shower, or visiting a
+> friend's place. Would a ride there help?"
+> John: "Yes."
+> Agent: "I'll call back soon to check on you. Goodbye, John."
 
 VO (over the end of the call): "The agent runs on Amazon Nova 2 Sonic, speech to speech in real time. It asks
 short questions, notices warning signs, and finds the nearest cooling center from records our web agent
@@ -67,7 +75,8 @@ checked today. Ninety-five degrees inside counts as a warning even when the AC s
 
 ## 6. Family hears right away (1:38 to 1:50)
 
-Visual: **YOU** the second call ringing ("automated alert from Kinwell about John"). Then
+Audio: Twilio does not record the alert call; have the AI voice read "This is an automated alert from Kinwell
+about John. John's home is very hot, about 95 degrees inside, and he feels dizzy." Visual:
 `family_home_phone.mp4` 0:08 to 0:20 (Rosa's status page).
 
 VO: "Seconds after the call, the family gets a phone alert, and the family site shows exactly what happened."
