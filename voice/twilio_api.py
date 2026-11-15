@@ -22,12 +22,18 @@ def _auth() -> tuple[str, str]:
 
 async def create_call(to: str, *, url: str | None = None, twiml: str | None = None,
                       status_callback: str | None = None, timeout_s: int = 25,
-                      detect_machine: bool = False) -> dict:
+                      detect_machine: bool = False, amd_callback: str | None = None) -> dict:
     data = {"To": to, "From": config.TWILIO_PHONE_NUMBER, "Timeout": str(timeout_s)}
     if detect_machine:
         # Twilio answering-machine detection: AnsweredBy is passed to the voice webhook.
         data["MachineDetection"] = "Enable"
         data["MachineDetectionTimeout"] = "8"
+        if amd_callback:
+            # Async AMD: the call connects to the agent immediately; the verdict arrives separately,
+            # so a person who answers never waits in silence while Twilio listens for a voicemail.
+            data["AsyncAmd"] = "true"
+            data["AsyncAmdStatusCallback"] = amd_callback
+            data["AsyncAmdStatusCallbackMethod"] = "POST"
     if url:
         data["Url"] = url
     if twiml:

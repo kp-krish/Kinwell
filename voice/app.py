@@ -99,6 +99,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         url=f"https://{base}/twilio/voice?checkin_id={checkin_id}",
         status_callback=f"https://{base}/twilio/status?checkin_id={checkin_id}",
         detect_machine=True,
+        amd_callback=f"https://{base}/twilio/amd?checkin_id={checkin_id}",
     )
     await store.update("checkins", checkin_id, {"call_sid": res.get("sid")})
     log.info("dialing %s checkin=%s sid=%s", person_id, checkin_id, res.get("sid"))
@@ -223,6 +224,26 @@ async def twilio_voice(request: Request, checkin_id: str, AnsweredBy: str = Form
     return Response(content=twiml, media_type="application/xml")
 
 
+@app.post("/twilio/amd")
+async def twilio_amd(checkin_id: str, AnsweredBy: str = Form(""), CallSid: str = Form("")):
+    """Async answering-machine verdict. A person is already talking to the agent; on voicemail, hang up."""
+    log.info("amd checkin=%s answered_by=%s", checkin_id, AnsweredBy)
+    if AnsweredBy.startswith("machine") or AnsweredBy == "fax":
+        store = get_store()
+        checkin = await store.get("checkins", checkin_id)
+        if checkin and not checkin.get("answered_by"):
+            await store.update("checkins", checkin_id, {"answered_by": AnsweredBy})
+            if CallSid:
+                try:
+                    await twilio_api.hangup(CallSid)
+                except Exception:
+                    log.exception("hangup after voicemail failed")
+            person = await store.get("residents", checkin["resident_id"])
+            asyncio.create_task(rules.on_no_answer(person, checkin_id, checkin.get("attempt", 0),
+                                                   why="reached voicemail"))
+    return Response(status_code=204)
+
+
 @app.post("/twilio/status")
 async def twilio_status(checkin_id: str, CallStatus: str = Form(""), CallDuration: str = Form("0")):
     store = get_store()
@@ -244,11 +265,15 @@ async def twilio_stream(ws: WebSocket):
     session: SonicSession | None = None
     ctx: CallContext | None = None
     play_until = 0.0  # monotonic time when queued agent audio finishes playing
+    t_start: float | None = None  # when Twilio's stream started, for first-audio latency
 
     async def send_audio(pcm: bytes):
-        nonlocal play_until
+        nonlocal play_until, t_start
         if not stream_sid:
             return
+        if t_start is not None:
+            log.info("first agent audio %.2fs after stream start", time.monotonic() - t_start)
+            t_start = None
         payload = base64.b64encode(pcm16_to_mulaw(pcm)).decode("ascii")
         await ws.send_text(json.dumps({"event": "media", "streamSid": stream_sid, "media": {"payload": payload}}))
         play_until = max(play_until, time.monotonic()) + len(pcm) / 16000.0  # 8 kHz * 2 bytes
@@ -284,6 +309,7 @@ async def twilio_stream(ws: WebSocket):
             msg = json.loads(await ws.receive_text())
             ev = msg.get("event")
             if ev == "start":
+                t_start = time.monotonic()
                 start = msg["start"]
                 stream_sid = start["streamSid"]
                 checkin_id = start.get("customParameters", {}).get("checkin_id")
@@ -308,8 +334,10 @@ async def twilio_stream(ws: WebSocket):
                     on_audio=send_audio, on_text=on_text, on_interrupt=on_interrupt,
                     on_tool=lambda name, args: handle_tool(ctx, name, args),
                 )
+                t0 = time.monotonic()
                 await session.start()
                 await session.send_user_text(opening_nudge(person))
+                log.info("sonic ready in %.2fs checkin=%s", time.monotonic() - t0, checkin_id)
                 log.info("stream started checkin=%s person=%s memory=%d", checkin_id, person["_id"], len(memory_bullets))
             elif ev == "media" and session:
                 await session.send_audio(mulaw_to_pcm16(base64.b64decode(msg["media"]["payload"])))
@@ -340,6 +368,10 @@ async def ready_to_end(ctx: CallContext) -> bool:
 async def post_call(ctx: CallContext, transcript: list[dict]) -> None:
     store = get_store()
     ended = now()
+    if ((await store.get("checkins", ctx.checkin_id)) or {}).get("answered_by", "").startswith(("machine", "fax")):
+        await store.update("checkins", ctx.checkin_id, {"call_status": "no_answer", "ended_at": ended})
+        log.info("post-call %s: voicemail, handled as no answer", ctx.checkin_id)
+        return
     await store.update("checkins", ctx.checkin_id, {
         "call_status": "completed", "ended_at": ended,
         "transcript": transcript,
