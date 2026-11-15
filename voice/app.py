@@ -57,7 +57,7 @@ def public_base(request: Request | None = None) -> str:
 
 async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled check-in",
                      context: dict | None = None, task_token: str | None = None,
-                     purpose: str = "checkin") -> dict:
+                     purpose: str = "checkin", record: bool = False) -> dict:
     store = get_store()
     person = await store.get("residents", person_id)
     if not person:
@@ -101,6 +101,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         status_callback=f"https://{base}/twilio/status?checkin_id={checkin_id}",
         detect_machine=True,
         amd_callback=f"https://{base}/twilio/amd?checkin_id={checkin_id}",
+        record=record,
     )
     await store.update("checkins", checkin_id, {"call_sid": res.get("sid")})
     start_prewarm(checkin_id, res.get("sid") or "")
@@ -198,7 +199,9 @@ async def start_call(payload: dict, x_api_key: str | None = Header(None)):
     """Start a check-in call: {"person_id": "res_lopez", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}"""
     require_dashboard(x_api_key)
     ctx = {k: payload[k] for k in ("high_f", "alert_type") if k in payload}
-    return await place_call(payload["person_id"], reason=payload.get("reason", "manual"), context=ctx)
+    return await place_call(payload["person_id"], reason=payload.get("reason", "manual"), context=ctx,
+                            purpose="consent" if payload.get("purpose") == "consent" else "checkin",
+                            record=bool(payload.get("record")))
 
 
 # ---------------------------------------------------------------- Twilio webhooks

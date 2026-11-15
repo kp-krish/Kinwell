@@ -22,8 +22,12 @@ def _auth() -> tuple[str, str]:
 
 async def create_call(to: str, *, url: str | None = None, twiml: str | None = None,
                       status_callback: str | None = None, timeout_s: int = 25,
-                      detect_machine: bool = False, amd_callback: str | None = None) -> dict:
+                      detect_machine: bool = False, amd_callback: str | None = None, record: bool = False) -> dict:
     data = {"To": to, "From": config.TWILIO_PHONE_NUMBER, "Timeout": str(timeout_s)}
+    if record:
+        # Demo takes only (staff-requested): both voices on separate channels. Deleted after download.
+        data["Record"] = "true"
+        data["RecordingChannels"] = "dual"
     if detect_machine:
         # Twilio answering-machine detection: AnsweredBy is passed to the voice webhook.
         data["MachineDetection"] = "Enable"
