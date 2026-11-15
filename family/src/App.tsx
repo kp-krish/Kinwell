@@ -5,6 +5,7 @@ import { idToken, signOut } from "./auth";
 import Assistant from "./Assistant";
 import { EmptyPeople, Hero, ModeSwitch, PersonCard } from "./Home";
 import PersonView from "./PersonView";
+import InstallHint from "./InstallHint";
 import SignIn from "./SignIn";
 import { Backdrop, Logo, Spinner, autoMode } from "./ui";
 
@@ -93,17 +94,18 @@ function Phone({ me, route, mode, setMode, onAdded, signOut, refreshKey, reload 
       <div className="relative z-10 mx-auto flex min-h-dvh max-w-[520px] flex-col">
         {route.name === "home" && (
           <>
-            <header className="flex items-center justify-between px-5 pt-5">
+            <header className="safe-top flex items-center justify-between px-5">
               <Logo />
               <ModeSwitch mode={mode} setMode={setMode} />
             </header>
             <div className="px-5 pt-6"><Hero me={me} mode={mode} /></div>
-            <h1 className="eyebrow px-5 pb-3 pt-8">Your people</h1>
+            <div className="px-5 pt-6"><InstallHint /></div>
+            <h1 className="eyebrow px-5 pb-3 pt-6">Your people</h1>
             <div className="flex flex-col gap-3 px-5 pb-32">
               {me.people.length === 0 && <EmptyPeople onAdd={() => go({ name: "add" })} />}
               {me.people.map((p) => <PersonCard key={p.id} p={p} onOpen={() => go({ name: "person", id: p.id })} />)}
             </div>
-            <nav className="glass fixed bottom-6 left-1/2 flex h-[68px] w-[calc(100%-40px)] max-w-[480px] -translate-x-1/2 items-center justify-between rounded-full pl-3.5 pr-2.5">
+            <nav className="glass safe-bottom fixed left-1/2 flex h-[68px] w-[calc(100%-40px)] max-w-[480px] -translate-x-1/2 items-center justify-between rounded-full pl-3.5 pr-2.5">
               <div className="flex gap-1">
                 <button aria-label="Home" className="flex h-12 w-12 items-center justify-center rounded-full bg-white"><HomeIcon size={22} /></button>
                 <button aria-label="Assistant" onClick={() => go({ name: "add" })} className="flex h-12 w-12 items-center justify-center rounded-full"><MessageCircle size={22} /></button>
@@ -114,8 +116,8 @@ function Phone({ me, route, mode, setMode, onAdded, signOut, refreshKey, reload 
           </>
         )}
         {route.name === "add" && (
-          <div className="flex h-dvh flex-col pb-5">
-            <header className="flex items-center gap-1 px-4 pb-3 pt-4">
+          <div className="safe-pb flex h-dvh flex-col">
+            <header className="safe-top flex items-center gap-1 px-4 pb-3">
               {back}
               <div className="flex flex-col">
                 <span className="serif text-[24px] leading-none">Add someone</span>
@@ -126,7 +128,7 @@ function Phone({ me, route, mode, setMode, onAdded, signOut, refreshKey, reload 
           </div>
         )}
         {route.name === "person" && (
-          <div className="px-5 pb-10 pt-4">
+          <div className="safe-top px-5 pb-10">
             <header className="pb-2">{back}</header>
             <PersonView id={route.id} refreshKey={refreshKey} onRemoved={() => { reload(); go({ name: "home" }); }} />
           </div>

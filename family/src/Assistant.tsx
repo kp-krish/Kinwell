@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Mic, MicOff } from "lucide-react";
 import { api, emptyDraft, type Draft, type Person } from "./api";
 import { Spinner } from "./ui";
+import Typewriter from "./Typewriter";
 
-type Msg = { role: "user" | "assistant"; text: string };
+type Msg = { role: "user" | "assistant"; text: string; typing?: boolean };
 
 const OPENING: Msg = {
   role: "assistant",
+  typing: true,
   text: "Hi! Who would you like HeatCheck to look after? Tell me about them, like \"my dad, Jorge\".",
 };
 
@@ -37,17 +39,20 @@ export default function Assistant({ onAdded, compact = false }: { onAdded: (p: P
   const recRef = useRef<SR | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [msgs, busy, ready]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [msgs.length, busy, ready]);
+  const follow = useCallback(() => endRef.current?.scrollIntoView({ block: "end" }), []);
+  const finishTyping = useCallback((i: number) => setMsgs((ms) => ms.map((m, j) => (j === i ? { ...m, typing: false } : m))), []);
+  const typing = msgs.some((m) => m.typing);
 
   async function send(t: string) {
     const clean = t.trim();
     if (!clean || busy) return;
-    const next: Msg[] = [...msgs, { role: "user", text: clean }];
+    const next: Msg[] = [...msgs.map((m) => ({ ...m, typing: false })), { role: "user", text: clean }];
     setMsgs(next); setText(""); setBusy(true); setError("");
     try {
       const r = await api.assistant(next.slice(1), draft);
       setDraft(r.draft); setMissing(r.missing); setReady(r.ready);
-      setMsgs([...next, { role: "assistant", text: r.reply }]);
+      setMsgs([...next, { role: "assistant", text: r.reply, typing: true }]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -99,7 +104,9 @@ export default function Assistant({ onAdded, compact = false }: { onAdded: (p: P
     <div className="flex h-full min-h-0 flex-col">
       <div className={`no-scrollbar flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto ${compact ? "" : "px-4"} pb-2 text-[15px] leading-snug`} aria-live="polite">
         {msgs.map((m, i) => (
-          <div key={i} className={`fade-in max-w-[84%] px-3.5 py-2.5 ${m.role === "user" ? "bubble-user self-end" : "bubble-bot self-start"}`}>{m.text}</div>
+          <div key={i} className={`fade-in max-w-[84%] px-3.5 py-2.5 ${m.role === "user" ? "bubble-user self-end" : "bubble-bot self-start"}`}>
+            {m.typing ? <Typewriter text={m.text} onTick={follow} onDone={() => finishTyping(i)} /> : m.text}
+          </div>
         ))}
         {busy && <div className="bubble-bot self-start px-4 py-3"><Spinner /></div>}
 
@@ -114,7 +121,7 @@ export default function Assistant({ onAdded, compact = false }: { onAdded: (p: P
             ))}
           </div>
         )}
-        {ready && (
+        {ready && !typing && (
           <button className="btn-ink fade-in mt-1 h-[52px] text-[16px]" onClick={add} disabled={adding}>
             {adding ? "Adding…" : `Add and ask ${first}`}
           </button>
@@ -124,7 +131,7 @@ export default function Assistant({ onAdded, compact = false }: { onAdded: (p: P
       </div>
 
       <div className={`flex flex-col gap-2.5 ${compact ? "pt-2" : "px-4 pt-2"}`}>
-        {!ready && chipsFor(missing).length > 0 && (
+        {!ready && !typing && chipsFor(missing).length > 0 && (
           <div className="flex flex-wrap gap-2">
             {chipsFor(missing).map((c) => (
               <button key={c} className="glass h-10 rounded-full px-4 text-[14px] font-medium" onClick={() => send(c)}>{c}</button>

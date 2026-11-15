@@ -106,3 +106,12 @@ body {
 @keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+.caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: var(--ink); animation: caret 0.9s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+
+/* Installed to the home screen: no browser bars, so respect the notch and home indicator. */
+html { overscroll-behavior: none; }
+.safe-top { padding-top: max(20px, env(safe-area-inset-top)); }
+.safe-bottom { bottom: max(24px, calc(env(safe-area-inset-bottom) + 8px)); }
+.safe-pb { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
