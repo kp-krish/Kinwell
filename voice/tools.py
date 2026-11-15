@@ -131,6 +131,7 @@ class CallContext:
     offered_center: bool = False
     center_pending: bool = False  # place offered; wait for the person's reply (ride?) before hanging up
     center_nudged: bool = False  # we already reminded the agent once to offer the place
+    center_line: str = ""  # what to say about the place, repeated in later tool results
 
 
 def _hour(h: str, m: str | None, ap: str) -> float:
@@ -175,6 +176,14 @@ async def _center(ctx: "CallContext", rtype: str) -> dict:
                       "coolest room, a cool shower, or a friend's place, or calling 2 1 1.")
     elif is_open:
         out["open_now"] = True
+    status = (f"is closed right now and opens at {opens}" if is_open is False
+              else f"is open today, {r.get('hours_today')}" if r.get("hours_today") else "")
+    ctx.center_line = (f"BEFORE any closing or goodbye, say: \"The nearest {rtype.replace('_', ' ')} is "
+                       f"{r['name']}, about {out['distance_miles']} miles away. It {status}.\" "
+                       + ("Then suggest the coolest room, a cool shower, or a friend's place until it opens. "
+                          if is_open is False else "")
+                       + "Then ask \"Would a ride there help?\" and wait for the answer. "
+                         "Your closing sentence comes only after they answer.")
     return out
 
 
@@ -209,9 +218,8 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
         ctx.offered_center = ctx.center_pending = True
         place = await _center(ctx, "warming_center" if ctx.hazard == "cold" else "cooling_center")
         return {"saved": True, "warning_signs": result["reasons"], "place": place,
-                "next_step": "Do NOT say goodbye yet. In your next sentence, offer this place (name, whether it is "
-                             "open now or when it opens, distance). Then ask if a ride would help and STOP talking "
-                             "until they answer. Only after their answer: one closing sentence, then end_call."}
+                "next_step": ctx.center_line or ("Do NOT say goodbye yet. In your next sentence, offer this place. "
+                                                 "Then ask if a ride would help and wait for the answer.")}
 
     if name == "flag_risk":
         level = args.get("level", "warning")
@@ -242,7 +250,8 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
     if name in ("find_cooling_center", "find_warming_center"):
         ctx.offered_center = True
         ctx.center_pending = True
-        return await _center(ctx, "cooling_center" if name == "find_cooling_center" else "warming_center")
+        place = await _center(ctx, "cooling_center" if name == "find_cooling_center" else "warming_center")
+        return {**place, "next_step": ctx.center_line or "Offer this place in your next sentence."}
 
     if name in ("find_ac_assistance", "find_heating_assistance"):
         rtype = "ac_program" if name == "find_ac_assistance" else "heat_program"
@@ -262,7 +271,10 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
             when = await scheduler.schedule_checkin(person["_id"], minutes, args.get("reason", "follow-up"))
         ctx.callback_booked = True
         await store.update("checkins", ctx.checkin_id, {"callback_at": when})
-        return {"scheduled": True, "minutes": minutes}
+        out = {"scheduled": True, "minutes": minutes}
+        if ctx.center_pending and ctx.center_line:
+            out["say_first"] = ctx.center_line
+        return out
 
     if name == "notify_contact":
         contact = await rules.next_contact(person)
