@@ -400,9 +400,10 @@ async def twilio_stream(ws: WebSocket):
     ctx: CallContext | None = None
     play_until = 0.0  # monotonic time when queued agent audio finishes playing
     t_start: float | None = None  # when Twilio's stream started, for first-audio latency
+    last_audio_at = 0.0  # monotonic time the agent last produced audio
 
     async def send_audio(pcm: bytes):
-        nonlocal play_until, t_start
+        nonlocal play_until, t_start, last_audio_at
         if not stream_sid:
             return
         if t_start is not None:
@@ -411,6 +412,7 @@ async def twilio_stream(ws: WebSocket):
         payload = base64.b64encode(pcm16_to_mulaw(pcm)).decode("ascii")
         await ws.send_text(json.dumps({"event": "media", "streamSid": stream_sid, "media": {"payload": payload}}))
         play_until = max(play_until, time.monotonic()) + len(pcm) / 16000.0  # 8 kHz * 2 bytes
+        last_audio_at = time.monotonic()
 
     async def on_interrupt():
         nonlocal play_until
@@ -433,8 +435,15 @@ async def twilio_stream(ws: WebSocket):
         await hangup()
 
     async def hangup():
-        # Let the goodbye finish playing, then end the call.
-        await asyncio.sleep(max(0.0, play_until - time.monotonic()) + 0.8)
+        # The model often calls end_call before (or while) it speaks its goodbye, so wait until
+        # it has gone quiet (no new audio for 1.5 s) and everything sent has played. Cap at 12 s.
+        deadline = time.monotonic() + 12
+        await asyncio.sleep(0.5)
+        while time.monotonic() < deadline:
+            t = time.monotonic()
+            if t - last_audio_at >= 1.5 and t >= play_until + 0.6:
+                break
+            await asyncio.sleep(0.2)
         if ctx and ctx.call_sid:
             await twilio_api.hangup(ctx.call_sid)
 
