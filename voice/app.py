@@ -431,6 +431,15 @@ async def twilio_stream(ws: WebSocket):
             ctx.center_pending = False  # they answered the offer (ride or not)
         # Safety net: the model sometimes says goodbye but never calls end_call, leaving dead air.
         if final and role == "ASSISTANT" and ctx and not ctx.ended and GOODBYE_RE.search(text):
+            if ctx.center_pending and not ctx.center_nudged and session:
+                # It said goodbye without offering the place it looked up: remind it once, keep the line open.
+                ctx.center_nudged = True
+                log.info("goodbye before offering the center; nudging checkin=%s", ctx.checkin_id)
+                await session.send_user_text(
+                    "(The person is still on the line. Before ending, tell them about the place from "
+                    "find_cooling_center or find_warming_center: its name, whether it is open now or when it opens, "
+                    "and how far it is. Ask if a ride would help, then wait for the answer.)")
+                return
             if await ready_to_end(ctx):
                 ctx.ended = True
                 log.info("goodbye heard without end_call; hanging up checkin=%s", ctx.checkin_id)
@@ -502,7 +511,7 @@ async def ready_to_end(ctx: CallContext) -> bool:
     checkin = await get_store().get("checkins", ctx.checkin_id) or {}
     if ctx.purpose == "consent":
         return "consent" in checkin
-    if "symptoms" not in checkin or (ctx.center_pending and ctx.end_refusals < 2):
+    if "symptoms" not in checkin or (ctx.center_pending and not ctx.center_nudged and ctx.end_refusals < 2):
         return False
     # Same rule as the end_call guard: offer a cooling/warming center on warning signs (give up after 2 tries).
     if (not ctx.offered_center and ctx.end_refusals < 2 and ctx.person.get("playbook") == "resident"

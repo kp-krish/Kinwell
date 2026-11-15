@@ -130,6 +130,7 @@ class CallContext:
     purpose: str = "checkin"
     offered_center: bool = False
     center_pending: bool = False  # place offered; wait for the person's reply (ride?) before hanging up
+    center_nudged: bool = False  # we already reminded the agent once to offer the place
 
 
 def _hour(h: str, m: str | None, ap: str) -> float:
