@@ -130,14 +130,14 @@ def _alert_message(person: dict, reason: str, emergency: bool, findings: str = "
     kind = "cold-weather" if hazard == "cold" else "heat"
     if emergency:
         signs = "hypothermia, frostbite or carbon monoxide" if hazard == "cold" else "heat stroke"
-        return (f"This is an urgent automated alert from HeatCheck. During a {kind} check-in call just now, "
+        return (f"This is an urgent automated alert from Kinwell. During a {kind} check-in call just now, "
                 f"{name} showed possible signs of {signs}: {reason}. {first} was told to call 9 1 1. "
                 f"Please check on {first} right away.")
     if findings:
         what = f"On today's {kind} check-in call, {first} told us that {findings}."
     else:
         what = f"Today's {kind} check-in found that {reason}."
-    return (f"Hello, this is an automated alert from HeatCheck about {name}. {what} "
+    return (f"Hello, this is an automated alert from Kinwell about {name}. {what} "
             f"Please check on {first} soon.")
 
 

@@ -14,7 +14,7 @@ from fastapi import FastAPI, Header, HTTPException
 
 from resource_scout import scout
 
-app = FastAPI(title="HeatCheck Resource Scout")
+app = FastAPI(title="Kinwell Resource Scout")
 TOKEN = os.environ.get("SCOUT_TOKEN", "")
 _state = {"running": False, "last": None, "started_at": None}
 _lock = threading.Lock()

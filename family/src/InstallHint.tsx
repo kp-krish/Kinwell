@@ -12,7 +12,7 @@ function dismissed() {
   try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
 }
 
-/** One-time tip on phones: install HeatCheck to the home screen so it opens full screen, like an app. */
+/** One-time tip on phones: install Kinwell to the home screen so it opens full screen, like an app. */
 export default function InstallHint() {
   const [evt, setEvt] = useState<BIPEvent | null>(null);
   const [show, setShow] = useState(false);
@@ -31,7 +31,7 @@ export default function InstallHint() {
   return (
     <div className="glass fade-in flex items-center gap-3 rounded-[22px] px-4 py-3 text-[14px]">
       <div className="flex-1 leading-snug">
-        {evt ? "Install HeatCheck for a full-screen app on your phone." : (
+        {evt ? "Install Kinwell for a full-screen app on your phone." : (
           <>For full screen, tap <Share size={14} className="inline -mt-0.5" /> <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</>
         )}
       </div>

@@ -1,4 +1,4 @@
-"""HeatCheck voice server: Twilio Media Streams <-> Amazon Nova 2 Sonic.
+"""Kinwell voice server: Twilio Media Streams <-> Amazon Nova 2 Sonic.
 
 Run locally:  python -m uvicorn voice.app:app --port 8080
 Twilio needs a public wss URL, so set PUBLIC_HOST (e.g. a cloudflared tunnel host).
@@ -27,7 +27,7 @@ from .tools import CallContext, handle_tool, tools_for
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app")
 
-app = FastAPI(title="HeatCheck voice")
+app = FastAPI(title="Kinwell voice")
 
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 

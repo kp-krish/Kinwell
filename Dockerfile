@@ -1,4 +1,4 @@
-# HeatCheck voice server (Twilio Media Streams <-> Amazon Nova 2 Sonic) for ECS Fargate.
+# Kinwell voice server (Twilio Media Streams <-> Amazon Nova 2 Sonic) for ECS Fargate.
 FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app

@@ -53,7 +53,7 @@ export default function SignIn({ onDone }: { onDone: () => void }) {
             Know they're okay on the hottest and coldest days.
           </h1>
           <p className="muted mt-5 max-w-[520px] text-[17px] leading-relaxed">
-            Add your mom, dad or grandparent. When the weather turns dangerous, HeatCheck calls to check on them
+            Add your mom, dad or grandparent. When the weather turns dangerous, Kinwell calls to check on them
             and tells you right away if something's wrong.
           </p>
           <div className="glass mt-8 hidden max-w-[460px] items-start gap-3 rounded-[22px] p-4 lg:flex">

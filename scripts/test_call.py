@@ -37,7 +37,7 @@ def main() -> int:
     sid = env["TWILIO_ACCOUNT_SID"]
     twiml = (
         "<Response><Say voice=\"Polly.Joanna\">"
-        "Hello, this is the HeatCheck test call. "
+        "Hello, this is the Kinwell test call. "
         "If you can hear this, Twilio is working. Goodbye."
         "</Say></Response>"
     )

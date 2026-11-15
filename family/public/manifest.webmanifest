@@ -1,7 +1,7 @@
 {
-  "name": "HeatCheck Family",
-  "short_name": "HeatCheck",
-  "description": "HeatCheck calls your parents on dangerous heat and cold days and tells you if something is wrong.",
+  "name": "Kinwell Family",
+  "short_name": "Kinwell",
+  "description": "Kinwell calls your parents on dangerous heat and cold days and tells you if something is wrong.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

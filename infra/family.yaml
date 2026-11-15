@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  HeatCheck Family sign-in: Amazon Cognito user pool for sons and daughters who enroll a parent.
+  Kinwell Family sign-in: Amazon Cognito user pool for sons and daughters who enroll a parent.
 
 Resources:
   UserPool:
@@ -24,8 +24,8 @@ Resources:
         RecoveryMechanisms: [{ Name: verified_email, Priority: 1 }]
       VerificationMessageTemplate:
         DefaultEmailOption: CONFIRM_WITH_CODE
-        EmailSubject: Your HeatCheck code
-        EmailMessage: "Your HeatCheck verification code is {####}"
+        EmailSubject: Your Kinwell code
+        EmailMessage: "Your Kinwell verification code is {####}"
 
   WebClient:
     Type: AWS::Cognito::UserPoolClient

@@ -1,7 +1,7 @@
 import type { Hazard, Level, Person } from "./api";
 
 export function Logo({ size = 26 }: { size?: number }) {
-  return <span className="serif italic" style={{ fontSize: size }}>HeatCheck</span>;
+  return <span className="serif italic" style={{ fontSize: size }}>Kinwell</span>;
 }
 
 export const LEVEL: Record<Level, { label: string; orb: string; pill: string }> = {

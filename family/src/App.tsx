@@ -68,7 +68,7 @@ export default function App() {
   if (!authed) return <SignIn onDone={() => { setAuthed(true); go({ name: "home" }); }} />;
   if (!me) return <div className="relative flex min-h-dvh items-center justify-center"><Backdrop /><Spinner className="relative" /></div>;
 
-  const doSignOut = () => { if (confirm("Sign out of HeatCheck?")) { signOut(); setAuthed(false); setMe(null); } };
+  const doSignOut = () => { if (confirm("Sign out of Kinwell?")) { signOut(); setAuthed(false); setMe(null); } };
   const onAdded = (id: string) => { load(); setRefreshKey((k) => k + 1); go({ name: "person", id }); };
   const setMode = (m: Hazard) => setModeState(m);
 

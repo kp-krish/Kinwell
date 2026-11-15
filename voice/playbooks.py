@@ -6,7 +6,7 @@ case means adding an entry here, not new code.
 
 PLAYBOOKS = {
     "resident": {
-        "label": "Valley heat check-in",
+        "label": "Kinwell heat check-in",
         "questions": [
             "Is your air conditioning working right now?",
             "How hot does it feel inside your home?",
@@ -19,7 +19,7 @@ PLAYBOOKS = {
         "target_minutes": 3,
     },
     "crew": {
-        "label": "HeatCheck crew check",
+        "label": "Kinwell crew check",
         "questions": [
             "Have you had water in the last hour?",
             "Have you had a shade or rest break since your last check-in?",
@@ -44,7 +44,7 @@ COLD_QUESTIONS = [
 
 # Consent call: asks permission before any check-ins start.
 CONSENT = {
-    "label": "HeatCheck",
+    "label": "Kinwell",
     "max_retries": 1,
     "retry_minutes": 15,
 }

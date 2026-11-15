@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  HeatCheck voice server. Twilio -> CloudFront (HTTPS/WSS) -> ALB -> ECS Fargate,
+  Kinwell voice server. Twilio -> CloudFront (HTTPS/WSS) -> ALB -> ECS Fargate,
   which streams each call to Amazon Nova 2 Sonic in us-west-2.
 
 Parameters:
@@ -63,7 +63,7 @@ Resources:
   AlbSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: HeatCheck ALB - CloudFront only
+      GroupDescription: Kinwell ALB - CloudFront only
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourcePrefixListId: !Ref CloudFrontPrefixList }
@@ -71,7 +71,7 @@ Resources:
   TaskSg:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: HeatCheck voice tasks - from ALB only
+      GroupDescription: Kinwell voice tasks - from ALB only
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AlbSg }
@@ -113,7 +113,7 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: HeatCheck voice (HTTPS + WebSockets for Twilio)
+        Comment: Kinwell voice (HTTPS + WebSockets for Twilio)
         PriceClass: PriceClass_100
         Origins:
           - Id: alb

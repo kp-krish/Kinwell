@@ -79,7 +79,7 @@ def deploy():
     if not st.get("agent_id"):
         agent = req("POST", "/api/agents", json={
             "name": NAME,
-            "description": "HeatCheck Resource Scout: TinyFish reads cooling-center pages; sleeps until a heat warning wakes it.",
+            "description": "Kinwell Resource Scout: TinyFish reads cooling-center pages; sleeps until a heat warning wakes it.",
             "framework": "custom",
             "exposedPort": 8000,
             "healthCheckPath": "/health",

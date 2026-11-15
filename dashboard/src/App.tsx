@@ -64,7 +64,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-heat-500 text-white shadow-sm"><ThermometerSun size={20} /></div>
           <div>
-            <h1 className="text-lg font-semibold leading-tight">HeatCheck</h1>
+            <h1 className="text-lg font-semibold leading-tight">Kinwell</h1>
             <p className="text-xs text-stone-500">Heat and cold check-ins</p>
           </div>
         </div>

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  HeatCheck escalation ladder (Step Functions + Lambda) and risk engine
+  Kinwell escalation ladder (Step Functions + Lambda) and risk engine
   (EventBridge Scheduler: NWS heat and cold alerts for every zone where enrolled people live).
 
 Parameters:
@@ -95,7 +95,7 @@ Resources:
       RoleArn: !GetAtt SfnRole.Arn
       DefinitionSubstitutions: { ActionsFn: !GetAtt ActionsFn.Arn }
       Definition:
-        Comment: "HeatCheck escalation ladder: alert one contact per rung, wait, place a follow-up call, decide from the result."
+        Comment: "Kinwell escalation ladder: alert one contact per rung, wait, place a follow-up call, decide from the result."
         StartAt: AlertContact
         States:
           AlertContact:

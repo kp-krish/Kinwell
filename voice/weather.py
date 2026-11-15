@@ -17,7 +17,7 @@ from .store import get_store, now
 log = logging.getLogger("weather")
 
 API = "https://api.weather.gov"
-HEADERS = {"User-Agent": "HeatCheck weather-safety prototype", "Accept": "application/geo+json"}
+HEADERS = {"User-Agent": "Kinwell weather-safety prototype", "Accept": "application/geo+json"}
 FORECAST_TTL = dt.timedelta(minutes=60)
 RECALL_GAP = dt.timedelta(hours=12)  # one hazard check-in per person per 12 hours, even if NWS reissues
 

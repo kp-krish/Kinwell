@@ -9,7 +9,7 @@ type Msg = { role: "user" | "assistant"; text: string; typing?: boolean };
 const OPENING: Msg = {
   role: "assistant",
   typing: true,
-  text: "Hi! Who would you like HeatCheck to look after? Tell me about them, like \"my dad, Jorge\".",
+  text: "Hi! Who would you like Kinwell to look after? Tell me about them, like \"my dad, Jorge\".",
 };
 
 // Browser speech-to-text (Chrome, Edge, Safari). Hidden where unsupported.

@@ -1,14 +1,14 @@
-# HeatCheck
+# Kinwell
 
-**HeatCheck phones people on dangerous heat days, in their language, on any phone, and gets help moving the moment something is wrong.**
+**Kinwell phones people on dangerous heat days, in their language, on any phone, and gets help moving the moment something is wrong.**
 
 Built at sunhacks 9.0 (Nov 14 to 15, 2026).
 
-Maricopa County confirmed 645 heat deaths in 2023 and 608 in 2024. Many people died alone at home, and more than three quarters of 2024 deaths happened outdoors. During a record heat wave, county staff phoned 93 vulnerable clients a week by hand. HeatCheck makes that check-in call to thousands of people on the same afternoon, and only pulls in a human when someone needs one.
+Maricopa County confirmed 645 heat deaths in 2023 and 608 in 2024. Many people died alone at home, and more than three quarters of 2024 deaths happened outdoors. During a record heat wave, county staff phoned 93 vulnerable clients a week by hand. Kinwell makes that check-in call to thousands of people on the same afternoon, and only pulls in a human when someone needs one.
 
 ## What it does
 
-On an NWS heat warning, HeatCheck calls every enrolled person. Two playbooks run on one engine:
+On an NWS heat warning, Kinwell calls every enrolled person. Two playbooks run on one engine:
 
 | | Residents | Crew Check (outdoor workers) |
 |---|---|---|
