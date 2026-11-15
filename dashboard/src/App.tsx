@@ -125,7 +125,9 @@ export default function App() {
               {(["emergency", "warning", "calling", "safe"] as Status[]).map((s) => (
                 <span key={s} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}</span>
               ))}
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ice" />Open center</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ice" />Cooling center</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#F4A47C]" />Warming center</span>
+              <span>· hover a center for details</span>
               <span>· square = crew worker</span>
             </div>
           </section>
