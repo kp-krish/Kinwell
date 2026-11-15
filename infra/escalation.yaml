@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   HeatCheck escalation ladder (Step Functions + Lambda) and risk engine
-  (EventBridge Scheduler polls NWS heat alerts for Maricopa County).
+  (EventBridge Scheduler: NWS heat and cold alerts for every zone where enrolled people live).
 
 Parameters:
   VoiceUrl: { Type: String, Description: "https://<cloudfront domain> of the voice service" }
@@ -52,7 +52,7 @@ Resources:
       FunctionName: hcs-risk-engine
       Runtime: python3.13
       Handler: index.handler
-      Timeout: 30
+      Timeout: 60
       Role: !GetAtt LambdaRole.Arn
       Environment:
         Variables:
@@ -63,29 +63,18 @@ Resources:
         ZipFile: |
           import json, os, urllib.request
 
-          HEAT_EVENTS = {"Extreme Heat Warning", "Excessive Heat Warning", "Heat Advisory", "Extreme Heat Watch"}
-
+          # Every 30 minutes: the voice service looks up active NWS heat and cold alerts for
+          # every zone where enrolled people live, and starts check-in calls for matches.
           def handler(event, context):
-              url = "https://api.weather.gov/alerts/active?zone=" + os.environ["NWS_ZONE"]
-              req = urllib.request.Request(url, headers={"User-Agent": "HeatCheck heat-safety prototype",
-                                                         "Accept": "application/geo+json"})
-              with urllib.request.urlopen(req, timeout=15) as r:
-                  feats = json.loads(r.read()).get("features", [])
-              heat = [f["properties"] for f in feats if f["properties"].get("event") in HEAT_EVENTS]
-              if not heat:
-                  print(json.dumps({"zone": os.environ["NWS_ZONE"], "active_heat_alerts": 0}))
-                  return {"heat_run": False}
-              a = heat[0]
-              body = {"alert_id": a.get("id"), "alert_type": "NWS " + a.get("event", "heat alert"),
-                      "headline": a.get("headline"), "high_f": 110}
-              req = urllib.request.Request(os.environ["VOICE_URL"].rstrip("/") + "/internal/heat-run",
-                                           data=json.dumps(body).encode(), method="POST",
+              req = urllib.request.Request(os.environ["VOICE_URL"].rstrip("/") + "/internal/weather-poll",
+                                           data=b"{}", method="POST",
                                            headers={"Content-Type": "application/json",
                                                     "X-Internal-Token": os.environ["INTERNAL_TOKEN"]})
-              with urllib.request.urlopen(req, timeout=25) as r:
+              with urllib.request.urlopen(req, timeout=55) as r:
                   out = json.loads(r.read() or b"{}")
-              print(json.dumps({"alert": body, "result": out})[:1000])
-              return {"heat_run": True, "result": out}
+              print(json.dumps(out)[:2000])
+              return {"zones": out.get("zones"), "alerts": len(out.get("alerts") or []),
+                      "calls": len(out.get("calls") or [])}
 
   SfnRole:
     Type: AWS::IAM::Role

@@ -52,6 +52,16 @@ def evaluate(person: dict, checkin: dict) -> dict:
     flag_reasons = [f["reason"] for f in flags if f.get("level") == "warning"]
     if checkin.get("ac_working") == "no":
         reasons.append("AC not working")
+    # Cold-weather facts
+    if checkin.get("heat_working") == "no":
+        reasons.append("heat not working")
+    if checkin.get("power_on") == "no":
+        reasons.append("no power or gas")
+    if checkin.get("unsafe_heating") == "yes":
+        reasons.append("using an unsafe indoor heat source")
+    t = _degrees(checkin.get("indoor_temp"))
+    if t is not None and t < 62:
+        reasons.append(f"home is cold, about {t} degrees inside")
     crew = person.get("playbook") == "crew"
     # Crews: a single missed water/shade break gets a reminder on the call, not a supervisor alert
     # (worker privacy); two in a row is handled by _crew_consecutive_check.
@@ -70,6 +80,15 @@ def evaluate(person: dict, checkin: dict) -> dict:
     return {"level": "warning" if reasons else "clear", "reasons": reasons}
 
 
+def _degrees(text) -> int | None:
+    import re
+    m = re.search(r"-?\d{2,3}", str(text or ""))
+    if not m:
+        return None
+    v = int(m.group())
+    return v if 20 <= v <= 100 else None
+
+
 def _join(items: list[str]) -> str:
     items = [i for i in items if i]
     if len(items) <= 1:
@@ -84,6 +103,15 @@ def spoken_findings(person: dict, checkin: dict) -> str:
     parts = []
     if checkin.get("ac_working") == "no":
         parts.append("the air conditioning is not working")
+    if checkin.get("heat_working") == "no":
+        parts.append("the heat is not working")
+    t = _degrees(checkin.get("indoor_temp"))
+    if t is not None and t < 62:
+        parts.append(f"it is about {t} degrees inside")
+    if checkin.get("power_on") == "no":
+        parts.append(f"{who} {has} no power or gas for heat")
+    if checkin.get("unsafe_heating") == "yes":
+        parts.append(f"{who} {is_} using an oven, stove, grill or generator indoors for heat")
     syms = [s.lower().strip() for s in checkin.get("symptoms") or []]
     if syms:
         parts.append(f"{who} {is_} feeling " + _join(syms).replace("dizziness", "dizzy"))
@@ -96,17 +124,19 @@ def spoken_findings(person: dict, checkin: dict) -> str:
     return _join(parts)
 
 
-def _alert_message(person: dict, reason: str, emergency: bool, findings: str = "") -> str:
+def _alert_message(person: dict, reason: str, emergency: bool, findings: str = "", hazard: str = "heat") -> str:
     name = person.get("name", "the person")
     first = person.get("first_name") or name
+    kind = "cold-weather" if hazard == "cold" else "heat"
     if emergency:
-        return (f"This is an urgent automated alert from HeatCheck. During a heat check-in call just now, "
-                f"{name} showed possible signs of heat stroke: {reason}. {first} was told to call 9 1 1. "
+        signs = "hypothermia, frostbite or carbon monoxide" if hazard == "cold" else "heat stroke"
+        return (f"This is an urgent automated alert from HeatCheck. During a {kind} check-in call just now, "
+                f"{name} showed possible signs of {signs}: {reason}. {first} was told to call 9 1 1. "
                 f"Please check on {first} right away.")
     if findings:
-        what = f"On today's heat check-in call, {first} told us that {findings}."
+        what = f"On today's {kind} check-in call, {first} told us that {findings}."
     else:
-        what = f"Today's heat check-in found that {reason}."
+        what = f"Today's {kind} check-in found that {reason}."
     return (f"Hello, this is an automated alert from HeatCheck about {name}. {what} "
             f"Please check on {first} soon.")
 
@@ -132,10 +162,14 @@ async def escalate_now(person: dict, checkin_id: str | None, reason: str, emerge
     else:
         nxt = await next_contact(person)
         targets = [nxt] if nxt else []
+    checkin = await get_store().get("checkins", checkin_id) if checkin_id else None
+    hazard = ((checkin or {}).get("context") or {}).get("hazard", "heat")
     notified = []
     for c in targets:
+        if not c.get("phone"):
+            continue
         try:
-            await twilio_api.notify_by_voice(c["phone"], _alert_message(person, reason, emergency, findings))
+            await twilio_api.notify_by_voice(c["phone"], _alert_message(person, reason, emergency, findings, hazard))
             notified.append(f"{c['name']} ({c['role']})")
         except Exception:
             log.exception("notify %s failed", c.get("name"))
@@ -148,6 +182,8 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
     """Apply rules once the call has ended and the tools have written the facts."""
     store = get_store()
     checkin = await store.get("checkins", checkin_id) or {}
+    if checkin.get("purpose") == "consent":
+        return await after_consent_call(person, checkin)
     has_facts = "water" in checkin or "symptoms" in checkin or checkin.get("flags")
     if not has_facts:
         # No answers were recorded (voicemail, dropped call, hung up early). Unconfirmed is never "safe".
@@ -175,7 +211,8 @@ async def after_call(person: dict, checkin_id: str, callback_booked: bool) -> di
         # Book one follow-up per ladder rung; once every contact has been alerted,
         # stop calling and leave the open alert for a human on the dashboard.
         if not callback_booked and step + 1 < max(ladder_len, 1):
-            await scheduler.schedule_checkin(person["_id"], 30, "warning-sign follow-up")
+            await scheduler.schedule_checkin(person["_id"], 30, "warning-sign follow-up",
+                                             context=checkin.get("context"))
         await store.update("checkins", checkin_id, {"ladder_step": step + 1})
     elif person.get("playbook") == "crew":
         await _crew_consecutive_check(person)
@@ -208,11 +245,39 @@ async def _crew_consecutive_check(person: dict) -> None:
                            emergency=False)
 
 
+async def after_consent_call(person: dict, checkin: dict) -> dict:
+    """Consent call: yes activates check-ins; no stops them. Never escalates."""
+    store = get_store()
+    if "consent" not in checkin:
+        await on_no_answer(person, checkin["_id"], checkin.get("attempt", 0), why="consent call ended without an answer")
+        return {"level": "no_answer", "reasons": ["consent not recorded"]}
+    agreed = bool(checkin["consent"])
+    await store.update("residents", person["_id"], {
+        "status": "active" if agreed else "declined",
+        "consent_at": now() if agreed else None, "consent_notes": checkin.get("consent_notes", "")})
+    await store.update("checkins", checkin["_id"], {"risk_level": "consent_yes" if agreed else "consent_no",
+                                                    "risk_reasons": []})
+    log.info("consent %s for %s", "granted" if agreed else "declined", person["_id"])
+    return {"level": "consent_yes" if agreed else "consent_no", "reasons": []}
+
+
 async def on_no_answer(person: dict, checkin_id: str, attempt: int, why: str = "no answer") -> None:
     """Missed call (no answer, busy, voicemail, or ended before answers): retry per playbook,
     then walk the escalation ladder. Never treated as safe."""
     pb = PLAYBOOKS[person.get("playbook", "resident")]
     store = get_store()
+    checkin0 = await store.get("checkins", checkin_id) or {}
+    if checkin0.get("purpose") == "consent":
+        # Consent calls never alert anyone; retry once, then wait for the family to try again.
+        from .playbooks import CONSENT
+        await store.update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer",
+                                                    "risk_reasons": [why]})
+        if attempt < CONSENT["max_retries"]:
+            await scheduler.schedule_checkin(person["_id"], CONSENT["retry_minutes"], "consent retry",
+                                             attempt=attempt + 1, purpose="consent")
+        else:
+            await store.update("residents", person["_id"], {"status": "consent_no_answer"})
+        return
     await store.update("checkins", checkin_id, {"call_status": "no_answer", "risk_level": "no_answer",
                                                 "risk_reasons": [why]})
     checkin = await store.get("checkins", checkin_id) or {}
@@ -221,7 +286,7 @@ async def on_no_answer(person: dict, checkin_id: str, attempt: int, why: str = "
         return
     if attempt < pb["max_retries"]:
         await scheduler.schedule_checkin(person["_id"], pb["retry_minutes"], "retry after no answer",
-                                         attempt=attempt + 1)
+                                         attempt=attempt + 1, context=checkin0.get("context"))
     else:
         first = person.get("first_name") or person.get("name", "they")
         reason = f"{first} did not answer {attempt + 1} check-in calls in a row"

@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  HeatCheck Family sign-in: Amazon Cognito user pool for sons and daughters who enroll a parent.
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: hcs-family
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration: { CaseSensitive: false }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: false
+          RequireUppercase: false
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+        - { Name: name, AttributeDataType: String, Required: false, Mutable: true }
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{ Name: verified_email, Priority: 1 }]
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: Your HeatCheck code
+        EmailMessage: "Your HeatCheck verification code is {####}"
+
+  WebClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: hcs-family-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      IdTokenValidity: 12
+      AccessTokenValidity: 12
+      RefreshTokenValidity: 30
+      TokenValidityUnits: { IdToken: hours, AccessToken: hours, RefreshToken: days }
+
+Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+    Export: { Name: hcs-family-user-pool-id }
+  ClientId:
+    Value: !Ref WebClient
+    Export: { Name: hcs-family-client-id }

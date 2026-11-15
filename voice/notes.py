@@ -20,7 +20,7 @@ MODELS = [m for m in [os.environ.get("GEMINI_MODEL"), "gemini-3.5-flash-lite", "
 
 class CaseNote(BaseModel):
     summary: str = Field(description="Two plain-language sentences for a caseworker.")
-    ac_status: str = Field(description="working | broken | unknown | not_applicable")
+    ac_status: str = Field(description="AC on heat days, heating on cold days: working | broken | unknown | not_applicable")
     symptoms: list[str]
     needs_human_today: bool
     reason: str = Field(description="One line: why a human should or need not call today.")
@@ -40,10 +40,11 @@ class Briefing(BaseModel):
     items: list[BriefingItem]
 
 
-NOTE_PROMPT = """You write case notes for a heat-safety check-in program in Maricopa County, Arizona.
+NOTE_PROMPT = """You write case notes for a heat and cold weather safety check-in program.
 Given a phone check-in transcript and the facts the system recorded, fill the schema.
 Be factual and brief. Never diagnose. Refer to the person by first name rather than pronouns. Use plain language a caseworker can scan in seconds.
-needs_human_today is true if there were warning signs (AC out, symptoms, no water, no rest) or the call was unclear."""
+needs_human_today is true if there were warning signs (AC or heat out, a very hot or cold home, no power, an unsafe heat source, symptoms, no water, no rest) or the call was unclear.
+summary is written for the family member who enrolled them: plain, warm, no jargon."""
 
 BRIEFING_PROMPT = """You prepare the briefing for heat-safety caseworkers and crew supervisors.
 Given today's check-in results, rank ONLY the people who need a human call today, most urgent first.

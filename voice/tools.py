@@ -31,9 +31,16 @@ TOOL_SPECS = [
             "symptoms": {"type": "array", "items": {"type": "string"},
                          "description": "Symptoms they reported, e.g. dizziness, headache. Empty if none."},
             "coworker_concern": {"type": "string", "enum": ["yes", "no", "unknown", "not_applicable"]},
+            "heat_working": {"type": "string", "enum": ["yes", "no", "unknown", "not_applicable"],
+                             "description": "Cold-weather calls: is their home heat working."},
+            "indoor_temp": {"type": "string", "description": "Cold-weather calls: how warm it is inside, in their words or degrees."},
+            "power_on": {"type": "string", "enum": ["yes", "no", "unknown", "not_applicable"],
+                         "description": "Cold-weather calls: do they have power and gas or fuel for heat."},
+            "unsafe_heating": {"type": "string", "enum": ["yes", "no", "unknown", "not_applicable"],
+                               "description": "Cold-weather calls: using an oven, stove, grill or generator indoors for heat."},
             "notes": {"type": "string", "description": "Anything else safety-relevant they said."},
         },
-        "required": ["water", "symptoms"],
+        "required": ["symptoms"],
     }),
     ToolSpec("flag_risk", "Raise a risk flag. Use level 'emergency' for heat-stroke signs "
              "(confusion, fainting, hot dry skin, vomiting, chest pain, coworker in trouble); "
@@ -68,6 +75,47 @@ TOOL_SPECS = [
 ]
 
 
+_BY_NAME = {t.name: t for t in TOOL_SPECS}
+
+COLD_FLAG = ToolSpec("flag_risk", "Raise a risk flag. Use level 'emergency' for hypothermia, frostbite or carbon "
+                     "monoxide signs (confusion, slurred speech, very drowsy, shivering that won't stop or has stopped, "
+                     "white or gray numb skin, chest pain, headache with dizziness near a fuel-burning heater); "
+                     "'warning' for heat not working, a cold home, no power or gas, an unsafe indoor heat source, "
+                     "heavy shivering or numb fingers.", _BY_NAME["flag_risk"].schema)
+
+COLD_EXTRA = [
+    ToolSpec("find_warming_center", "Find the nearest open warming center with today's hours.", {
+        "type": "object", "properties": {}, "required": [],
+    }),
+    ToolSpec("find_heating_assistance", "Find a heating repair or utility bill assistance program.", {
+        "type": "object", "properties": {}, "required": [],
+    }),
+]
+
+COLD_TOOL_SPECS = ([_BY_NAME["record_checkin"], COLD_FLAG] + COLD_EXTRA
+                   + [_BY_NAME[n] for n in ("schedule_callback", "notify_contact", "end_call")])
+
+CONSENT_TOOL_SPECS = [
+    ToolSpec("record_consent", "Save whether the person agreed to receive check-in calls on dangerous heat or cold days.", {
+        "type": "object",
+        "properties": {
+            "agreed": {"type": "boolean"},
+            "notes": {"type": "string", "description": "Anything they asked or said about the calls, in English."},
+        },
+        "required": ["agreed"],
+    }),
+    _BY_NAME["end_call"],
+]
+
+
+def tools_for(purpose: str, hazard: str) -> list:
+    if purpose == "consent":
+        return CONSENT_TOOL_SPECS
+    if hazard == "cold":
+        return COLD_TOOL_SPECS
+    return TOOL_SPECS
+
+
 @dataclass
 class CallContext:
     person: dict
@@ -78,6 +126,8 @@ class CallContext:
     ended: bool = False
     end_refusals: int = 0
     hangup_cb: object = None  # async callable
+    hazard: str = "heat"
+    purpose: str = "checkin"
 
 
 def _fmt_age(fetched_at) -> str:
@@ -96,8 +146,9 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
     person = ctx.person
 
     if name == "record_checkin":
-        fields = {k: args.get(k) for k in ("ac_working", "indoor_heat", "water", "rest_break",
-                                           "coworker_concern", "notes")}
+        keys = ("ac_working", "indoor_heat", "water", "rest_break", "coworker_concern", "notes",
+                "heat_working", "indoor_temp", "power_on", "unsafe_heating")
+        fields = {k: args[k] for k in keys if args.get(k) is not None}
         fields["symptoms"] = args.get("symptoms") or []
         await store.update("checkins", ctx.checkin_id, fields)
         return {"saved": True}
@@ -123,11 +174,18 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
                     "action": f"{contact['name']} ({contact['role']}) will be alerted when this call ends."}
         return {"flagged": True, "action": "The care team will be alerted when this call ends."}
 
-    if name == "find_cooling_center":
+    if name == "record_consent":
+        agreed = bool(args.get("agreed"))
+        await store.update("checkins", ctx.checkin_id, {"consent": agreed, "consent_notes": args.get("notes", "")})
+        return {"saved": True, "agreed": agreed}
+
+    if name in ("find_cooling_center", "find_warming_center"):
+        rtype = "cooling_center" if name == "find_cooling_center" else "warming_center"
         lng, lat = person["location"]["coordinates"]
-        r = await store.nearest_resource(lng, lat, "cooling_center")
+        r = await store.nearest_resource(lng, lat, rtype, max_m=40000)
         if not r:
-            return {"found": False, "message": "No open cooling center found nearby in today's data."}
+            return {"found": False, "message": f"No open {rtype.replace('_', ' ')} found nearby in today's data. "
+                                               "Suggest a friend or family member's warm home, or calling 2 1 1."}
         miles = round(r.get("distance_m", 0) / 1609.34, 1)
         return {
             "found": True, "name": r["name"], "address": r["address"],
@@ -135,8 +193,9 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
             "notes": r.get("notes", ""), "data_fetched": _fmt_age(r.get("fetched_at")),
         }
 
-    if name == "find_ac_assistance":
-        rows = await store.find("resources", {"type": "ac_program"}, limit=1)
+    if name in ("find_ac_assistance", "find_heating_assistance"):
+        rtype = "ac_program" if name == "find_ac_assistance" else "heat_program"
+        rows = await store.find("resources", {"type": rtype}, limit=1)
         if not rows:
             return {"found": False}
         r = rows[0]
@@ -163,14 +222,18 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
     if name == "end_call":
         # Guard in code: don't hang up before the check-in is recorded with real answers.
         checkin = await store.get("checkins", ctx.checkin_id) or {}
-        unanswered = [q for q, k in (("drinking water", "water"),) if checkin.get(k) in (None, "unknown")]
-        if "symptoms" not in checkin:
-            unanswered.append("symptoms")
+        if ctx.purpose == "consent":
+            unanswered = [] if "consent" in checkin else ["whether it is okay to call (then call record_consent)"]
+        else:
+            must = (("whether their heat works", "heat_working"),) if ctx.hazard == "cold"                 else (("drinking water", "water"),)
+            unanswered = [q for q, k in must if checkin.get(k) in (None, "unknown")]
+            if "symptoms" not in checkin:
+                unanswered.append("symptoms")
         emergency = any(f.get("level") == "emergency" for f in ctx.flags)
         if unanswered and not emergency and ctx.end_refusals < 2:
             ctx.end_refusals += 1
-            return {"ok": False, "error": "Do not hang up yet. Ask about: " + ", ".join(unanswered)
-                    + ". Then call record_checkin, say goodbye, and call end_call."}
+            then = "" if ctx.purpose == "consent" else " Then call record_checkin, say goodbye, and call end_call."
+            return {"ok": False, "error": "Do not hang up yet. Ask about: " + ", ".join(unanswered) + "." + then}
         ctx.ended = True
         if ctx.hangup_cb:
             asyncio.create_task(ctx.hangup_cb())

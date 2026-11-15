@@ -34,7 +34,8 @@ def cancel(person_id: str) -> None:
         log.info("cancelled pending call for %s", person_id)
 
 
-async def schedule_checkin(person_id: str, minutes: int, reason: str, attempt: int = 0) -> dt.datetime:
+async def schedule_checkin(person_id: str, minutes: int, reason: str, attempt: int = 0,
+                         purpose: str = "checkin", context: dict | None = None) -> dt.datetime:
     when = now() + dt.timedelta(minutes=minutes)
     delay = minutes * SECONDS_PER_MINUTE
     cancel(person_id)  # one pending call per person
@@ -48,7 +49,7 @@ async def schedule_checkin(person_id: str, minutes: int, reason: str, attempt: i
         _pending.pop(person_id, None)
         if place_call:
             try:
-                await place_call(person_id, attempt=attempt, reason=reason)
+                await place_call(person_id, attempt=attempt, reason=reason, purpose=purpose, context=context)
             except Exception:
                 log.exception("scheduled call failed")
 

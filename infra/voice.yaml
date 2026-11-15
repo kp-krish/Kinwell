@@ -56,6 +56,9 @@ Resources:
               - Effect: Allow
                 Action: [states:SendTaskSuccess, states:SendTaskFailure]
                 Resource: "*"
+              - Effect: Allow
+                Action: [geo-places:Geocode]
+                Resource: !Sub "arn:aws:geo-places:${AWS::Region}::provider/default"
 
   AlbSg:
     Type: AWS::EC2::SecurityGroup
@@ -149,6 +152,8 @@ Resources:
             - { Name: DEMO_SECONDS_PER_MINUTE, Value: !Ref DemoSecondsPerMinute }
             - { Name: CREW_IGNORE_SHIFT_HOURS, Value: "1" }
             - { Name: STATE_MACHINE_ARN, Value: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:hcs-escalation" }
+            - { Name: COGNITO_USER_POOL_ID, Value: !ImportValue hcs-family-user-pool-id }
+            - { Name: COGNITO_CLIENT_ID, Value: !ImportValue hcs-family-client-id }
           Secrets:
             - { Name: TWILIO_ACCOUNT_SID, ValueFrom: !Sub "${SecretArn}:TWILIO_ACCOUNT_SID::" }
             - { Name: TWILIO_AUTH_TOKEN, ValueFrom: !Sub "${SecretArn}:TWILIO_AUTH_TOKEN::" }

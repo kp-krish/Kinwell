@@ -16,13 +16,13 @@ from xml.sax.saxutils import quoteattr
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
-from . import config, memory, rules, scheduler, twilio_api
+from . import config, family, memory, rules, scheduler, twilio_api, weather
 from .audio import mulaw_to_pcm16, pcm16_to_mulaw
 from .playbooks import VOICES
 from .prompts import build_system_prompt, opening_nudge
 from .sonic import SonicSession
 from .store import calls_today, get_store, now
-from .tools import TOOL_SPECS, CallContext, handle_tool
+from .tools import CallContext, handle_tool, tools_for
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app")
@@ -32,9 +32,18 @@ app = FastAPI(title="HeatCheck voice")
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.include_router(family.router)
 
 TRANSCRIPT_TTL_DAYS = 30
 PHX = dt.timezone(dt.timedelta(hours=-7))  # Arizona has no DST
+
+
+def local_now(person: dict) -> dt.datetime:
+    from zoneinfo import ZoneInfo
+    try:
+        return now().astimezone(ZoneInfo(person.get("tz") or "America/Phoenix"))
+    except Exception:
+        return now().astimezone(PHX)
 
 
 def public_base(request: Request | None = None) -> str:
@@ -45,13 +54,21 @@ def public_base(request: Request | None = None) -> str:
 # ---------------------------------------------------------------- placing calls
 
 async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled check-in",
-                     context: dict | None = None, task_token: str | None = None) -> dict:
+                     context: dict | None = None, task_token: str | None = None,
+                     purpose: str = "checkin") -> dict:
     store = get_store()
     person = await store.get("residents", person_id)
     if not person:
         raise HTTPException(404, f"unknown person {person_id}")
     if not person.get("phone"):
         raise HTTPException(400, f"{person_id} has no phone number")
+    if purpose == "checkin" and (person.get("paused") or person.get("status") not in (None, "active")):
+        # No check-ins before consent, after a "no", or while the family has paused calls.
+        log.info("skip call to %s: status=%s paused=%s", person_id, person.get("status"), person.get("paused"))
+        if task_token:
+            from . import escalation
+            await escalation.report_followup(task_token, "no_answer", ["calls paused or not consented"])
+        return {"skipped": "not active"}
     # Never ring someone who is already on (or being dialed for) a check-in call.
     recent = now() - dt.timedelta(minutes=10)
     active = [c for c in await store.find("checkins", {"resident_id": person_id}, sort="started_at", limit=5)
@@ -72,7 +89,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
     checkin_id = await store.insert("checkins", {
         "resident_id": person_id, "resident_name": person.get("name"),
         "playbook": person.get("playbook"), "started_at": now(), "attempt": attempt,
-        "reason": reason, "call_status": "dialing", "context": context or {},
+        "reason": reason, "call_status": "dialing", "context": context or {}, "purpose": purpose,
         **({"task_token": task_token} if task_token else {}),
     })
     base = public_base()
@@ -88,6 +105,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
 
 
 scheduler.place_call = place_call
+family.place_call = place_call
 
 
 import hmac  # noqa: E402
@@ -133,10 +151,11 @@ async def internal_notify(payload: dict, x_internal_token: str | None = Header(N
 async def internal_followup(payload: dict, x_internal_token: str | None = Header(None)):
     """Step Functions rung: place a follow-up call; its result is sent back with the task token."""
     require_internal(x_internal_token)
+    orig = await get_store().get("checkins", payload.get("checkin_id") or "") or {}
+    ctx = orig.get("context") or {"hazard": "heat", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}
     try:
         res = await place_call(payload["person_id"], attempt=0, reason="escalation follow-up",
-                               context={"high_f": 112, "alert_type": "NWS Extreme Heat Warning"},
-                               task_token=payload["task_token"])
+                               context=ctx, task_token=payload["task_token"])
     except HTTPException as e:
         res = {"skipped": e.detail}
     if res.get("skipped"):
@@ -156,6 +175,13 @@ async def internal_heat_run(payload: dict, x_internal_token: str | None = Header
     await store.insert("heat_runs", {"_id": alert_id, "alert_type": payload.get("alert_type"),
                                      "headline": payload.get("headline"), "started_at": now()})
     return await api_simulate({**payload, "source": "nws"})
+
+
+@app.post("/internal/weather-poll")
+async def internal_weather_poll(x_internal_token: str | None = Header(None)):
+    """Risk engine (every 30 min): NWS heat and cold alerts for every zone where enrolled people live."""
+    require_internal(x_internal_token)
+    return await weather.poll(place_call)
 
 
 @app.get("/health")
@@ -253,18 +279,21 @@ async def twilio_stream(ws: WebSocket):
                 checkin = await store.get("checkins", checkin_id)
                 person = await store.get("residents", checkin["resident_id"])
                 await store.update("checkins", checkin_id, {"call_status": "in_progress", "answered_at": now()})
-                ctx = CallContext(person=person, checkin_id=checkin_id, call_sid=start.get("callSid", ""),
-                                  hangup_cb=hangup)
-                memory_bullets = await memory.recall(person)
-                call_ctx = {"high_f": 112, "alert_type": "NWS Extreme Heat Warning",
-                            "local_time": now().astimezone(PHX).strftime("%I:%M %p").lstrip("0")}
+                purpose = checkin.get("purpose", "checkin")
+                call_ctx = {"hazard": "heat", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}
                 call_ctx.update(checkin.get("context") or {})
+                call_ctx["purpose"] = purpose
+                call_ctx["local_time"] = local_now(person).strftime("%I:%M %p").lstrip("0")
+                hazard = call_ctx.get("hazard", "heat")
+                ctx = CallContext(person=person, checkin_id=checkin_id, call_sid=start.get("callSid", ""),
+                                  hangup_cb=hangup, hazard=hazard, purpose=purpose)
+                memory_bullets = await memory.recall(person) if purpose == "checkin" else []
                 prompt = build_system_prompt(person, call_ctx, memory_bullets)
                 await store.update("checkins", checkin_id, {"memory_used": memory_bullets})
                 session = SonicSession(
                     system_prompt=prompt,
                     voice_id=VOICES.get(person.get("language", "en"), "tiffany"),
-                    tools=TOOL_SPECS,
+                    tools=tools_for(purpose, hazard),
                     on_audio=send_audio, on_text=on_text, on_interrupt=on_interrupt,
                     on_tool=lambda name, args: handle_tool(ctx, name, args),
                 )
@@ -296,14 +325,17 @@ async def post_call(ctx: CallContext, transcript: list[dict]) -> None:
     })
     result = await rules.after_call(ctx.person, ctx.checkin_id, ctx.callback_booked)
     log.info("post-call %s -> %s %s", ctx.checkin_id, result["level"], result["reasons"])
+    if ctx.purpose == "consent":
+        return
     try:
         from . import notes
         note = await notes.case_note(ctx.person, transcript, result)
         if note:
             await store.update("checkins", ctx.checkin_id, {"case_note": note})
-            stamp = ended.astimezone(PHX).strftime("%b %d, %I:%M %p").replace(" 0", " ")
+            stamp = ended.astimezone(local_now(ctx.person).tzinfo).strftime("%b %d, %I:%M %p").replace(" 0", " ")
             if note.get("memory_summary"):
-                await memory.remember(ctx.person, f"{stamp} check-in: {note['memory_summary']}")
+                kind = "cold-weather" if ctx.hazard == "cold" else "heat"
+                await memory.remember(ctx.person, f"{stamp} {kind} check-in: {note['memory_summary']}")
     except Exception:
         log.exception("case note failed")
 
@@ -344,7 +376,7 @@ async def api_state():
     crews = await store.find("crews")
     runs = await store.find("scout_runs", sort="started_at", limit=5)
     # Simulator test people (scripts/sim_call.py) stay out of the dashboard.
-    sim_ids = {r["_id"] for r in residents if r.get("sim")}
+    sim_ids = {r["_id"] for r in residents if r.get("sim") or r.get("status") == "removed"}
     residents = [r for r in residents if r["_id"] not in sim_ids]
     checkins = [c for c in checkins if c.get("resident_id") not in sim_ids]
     alerts = [a for a in alerts if a.get("resident_id") not in sim_ids]
@@ -374,21 +406,32 @@ async def api_ack(alert_id: str, payload: dict | None = None, x_api_key: str | N
 @app.post("/api/simulate-heat-warning")
 async def simulate_route(payload: dict | None = None, x_api_key: str | None = Header(None)):
     require_dashboard(x_api_key)
+    return await api_simulate({**(payload or {}), "hazard": "heat"})
+
+
+@app.post("/api/simulate-weather")
+async def simulate_weather_route(payload: dict | None = None, x_api_key: str | None = Header(None)):
+    """Demo trigger for either hazard: {"hazard": "cold"} simulates an NWS Extreme Cold Warning."""
+    require_dashboard(x_api_key)
     return await api_simulate(payload)
 
 
 async def api_simulate(payload: dict | None = None):
-    """Demo trigger: an NWS Extreme Heat Warning starts a heat-day run.
-    Calls every enrolled person with a phone number (or just person_id), and wakes Resource Scout."""
+    """Demo trigger: an NWS heat (or cold) warning starts a check-in run.
+    Calls every eligible enrolled person with a phone number (or just person_id), and wakes Resource Scout."""
     payload = payload or {}
-    ctx = {"high_f": payload.get("high_f", 112), "alert_type": "NWS Extreme Heat Warning"}
+    hazard = payload.get("hazard", "heat") if payload.get("hazard") in ("heat", "cold") else "heat"
+    if hazard == "cold":
+        ctx = {"hazard": "cold", "low_f": payload.get("low_f", -4), "alert_type": "NWS Extreme Cold Warning"}
+    else:
+        ctx = {"hazard": "heat", "high_f": payload.get("high_f", 112), "alert_type": "NWS Extreme Heat Warning"}
     store = get_store()
     targets = [payload["person_id"]] if payload.get("person_id") else \
-        [r["_id"] for r in await store.find("residents") if r.get("phone") and r.get("playbook") == "resident"]
+        [r["_id"] for r in await store.find("residents") if weather.eligible(r, hazard)]
     placed = []
     for pid in targets:
         try:
-            placed.append({pid: await place_call(pid, reason="NWS heat warning", context=ctx)})
+            placed.append({pid: await place_call(pid, reason=f"NWS {hazard} warning", context=ctx)})
         except HTTPException as e:
             placed.append({pid: {"error": e.detail}})
     scout = await wake_scout() if payload.get("wake_scout", True) else None
