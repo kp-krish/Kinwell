@@ -285,4 +285,9 @@ class SonicSession:
         except Exception as e:
             log.exception("tool %s failed", name)
             result = {"error": str(e)}
-        await self._send_tool_result(tool["toolUseId"], result)
+        if not self.active:
+            return  # call already ended; nothing to send the result to
+        try:
+            await self._send_tool_result(tool["toolUseId"], result)
+        except OSError:
+            log.info("tool %s finished after the stream closed", name)
