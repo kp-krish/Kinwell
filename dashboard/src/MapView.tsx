@@ -4,7 +4,7 @@ import type { Checkin, Resident, Resource } from "./api";
 import { STATUS_META, statusOf } from "./status";
 
 // Amazon Location Service map style when configured (VITE_MAP_STYLE), otherwise an open style.
-const STYLE = (import.meta.env.VITE_MAP_STYLE as string | undefined) || "https://tiles.openfreemap.org/styles/fiord";
+const STYLE = (import.meta.env.VITE_MAP_STYLE as string | undefined) || "https://tiles.openfreemap.org/styles/dark";
 
 interface Props {
   residents: Resident[];
@@ -25,6 +25,7 @@ export default function MapView({ residents, latest, resources, onSelect }: Prop
       container: el.current, style: STYLE, center: [-112.0, 33.45], zoom: 9.6, attributionControl: { compact: true },
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    if (!import.meta.env.VITE_MAP_STYLE) map.current.on("style.load", () => theme(map.current!));
     return () => { map.current?.remove(); map.current = null; };
   }, []);
 
@@ -102,4 +103,35 @@ function placeHtml(c: Resource): string {
     <div class="pp-src">${seed ? "Hours not verified today (seed data)" : `Hours checked ${esc(checked)}${host ? ` · ${esc(host)}` : ""}`}</div>
     <a class="pp-link" href="${maps}" target="_blank" rel="noopener noreferrer">Directions</a>
   </div>`;
+}
+
+/** Recolor the open dark style to Kinwell's violet-ink palette, with labels bright enough to read. */
+function theme(m: MLMap) {
+  const set = (id: string, prop: string, value: unknown) => {
+    try { if (m.getLayer(id)) m.setPaintProperty(id, prop, value); } catch { /* layer differs in this style */ }
+  };
+  for (const layer of m.getStyle().layers || []) {
+    const id = layer.id;
+    if (layer.type === "background") set(id, "background-color", "#1D1A27");
+    else if (id === "water") set(id, "fill-color", "#1E2640");
+    else if (id === "waterway") set(id, "line-color", "#25304F");
+    else if (id.startsWith("landuse_residential")) { set(id, "fill-color", "#252131"); set(id, "fill-opacity", 0.7); }
+    else if (id === "landuse_park" || id === "landcover_wood") set(id, "fill-color", "#1E2A28");
+    else if (id === "building") { set(id, "fill-color", "#272334"); set(id, "fill-outline-color", "#2E2A3C"); }
+    else if (id.startsWith("aeroway")) set(id, layer.type === "fill" ? "fill-color" : "line-color", "#2A2637");
+    else if (id.startsWith("railway")) set(id, "line-color", id.endsWith("dashline") ? "#1D1A27" : "#2F2B3C");
+    else if (id.startsWith("boundary")) set(id, "line-color", "#5A5368");
+    else if (layer.type === "line" && id.startsWith("highway")) {
+      const color = id.includes("motorway") ? (id.includes("casing") ? "#4A4459" : "#3D3750")
+        : id.includes("major") ? (id.includes("casing") ? "#3F394E" : "#332E42") : "#2C2839";
+      set(id, "line-color", color);
+    } else if (layer.type === "symbol") {
+      const big = id === "place_city" || id === "place_city_large" || id === "place_state";
+      const place = id.startsWith("place");
+      set(id, "text-color", big ? "#F4F0FA" : place ? "#D6CFE3" : id === "water_name" ? "#9FB6E3" : "#ABA3BB");
+      set(id, "text-halo-color", "rgba(20,18,27,0.95)");
+      set(id, "text-halo-width", big ? 1.8 : 1.4);
+      set(id, "text-halo-blur", 0.4);
+    }
+  }
 }

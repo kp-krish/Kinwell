@@ -21,7 +21,11 @@ interface Hazard { hazard: "heat" | "cold"; label: string; temp?: string; place?
 export default function App() {
   const [state, setState] = useState<State | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState<View>("now");
+  const [view, setViewState] = useState<View>(() => {
+    const h = window.location.hash.slice(1);
+    return VIEWS.some((v) => v.id === h) ? (h as View) : "now";
+  });
+  const setView = (v: View) => { setViewState(v); history.replaceState(null, "", v === "now" ? " " : `#${v}`); };
   const [selected, setSelected] = useState<Checkin | null>(null);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [briefingBusy, setBriefingBusy] = useState(false);
