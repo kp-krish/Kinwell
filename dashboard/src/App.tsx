@@ -184,11 +184,9 @@ function Logo({ sub }: { sub?: string }) {
 function Header({ view, setView, hazard, busy, onHeat, onCold }: {
   view: View; setView: (v: View) => void; hazard: Hazard; busy: string | null; onHeat: () => void; onCold: () => void;
 }) {
-  const hour = new Date().getHours();
-  const shift = hour >= 19 || hour < 7 ? "Team · night shift" : "Team · day shift";
   return (
     <header className="flex flex-wrap items-center gap-4 pt-1">
-      <Logo sub={shift} />
+      <Logo sub="Team" />
       <nav aria-label="Main" className="ml-2 hidden gap-1 rounded-full bg-white/[0.06] p-1 md:flex">
         {VIEWS.map((v) => (
           <button key={v.id} onClick={() => setView(v.id)} aria-current={view === v.id ? "page" : undefined}
