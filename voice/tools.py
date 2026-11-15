@@ -129,6 +129,52 @@ class CallContext:
     hazard: str = "heat"
     purpose: str = "checkin"
     offered_center: bool = False
+    center_pending: bool = False  # place offered; wait for the person's reply (ride?) before hanging up
+
+
+def _hour(h: str, m: str | None, ap: str) -> float:
+    v = int(h) % 12 + (12 if ap.lower() == "pm" else 0)
+    return v + (int(m) / 60 if m else 0)
+
+
+def _open_now(hours: str | None, tz: str | None) -> tuple[bool | None, str | None]:
+    """(open now?, opening time) from text like "9 AM to 5 PM" in the person's time zone."""
+    import re
+    from zoneinfo import ZoneInfo
+    if not hours:
+        return None, None
+    if "24" in hours or "all night" in hours.lower():
+        return True, None
+    t = re.findall(r"(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m", hours.lower())
+    if len(t) < 2:
+        return None, None
+    start, end = _hour(*t[0][:2], t[0][2] + "m"), _hour(*t[1][:2], t[1][2] + "m")
+    n = dt.datetime.now(ZoneInfo(tz or "America/Phoenix"))
+    cur = n.hour + n.minute / 60
+    opens = hours.split(" to ")[0].strip() if " to " in hours else None
+    if opens:
+        opens += " today" if cur < start else " tomorrow"
+    return (start <= cur < end), opens
+
+
+async def _center(ctx: "CallContext", rtype: str) -> dict:
+    person = ctx.person
+    lng, lat = person["location"]["coordinates"]
+    r = await get_store().nearest_resource(lng, lat, rtype, max_m=40000)
+    if not r:
+        return {"found": False, "message": f"No open {rtype.replace('_', ' ')} found nearby in today's data. "
+                                           "Suggest a friend or family member's home, or calling 2 1 1."}
+    is_open, opens = _open_now(r.get("hours_today"), person.get("tz"))
+    out = {"found": True, "name": r["name"], "address": r["address"], "hours_today": r.get("hours_today"),
+           "distance_miles": round(r.get("distance_m", 0) / 1609.34, 1), "notes": r.get("notes", ""),
+           "data_fetched": _fmt_age(r.get("fetched_at"))}
+    if is_open is False:
+        out["open_now"] = False
+        out["say"] = (f"It is closed right now and opens at {opens}. Until then, suggest staying in the "
+                      "coolest room, a cool shower, or a friend's place, or calling 2 1 1.")
+    elif is_open:
+        out["open_now"] = True
+    return out
 
 
 def _fmt_age(fetched_at) -> str:
@@ -152,7 +198,19 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
         fields = {k: args[k] for k in keys if args.get(k) is not None}
         fields["symptoms"] = args.get("symptoms") or []
         await store.update("checkins", ctx.checkin_id, fields)
-        return {"saved": True}
+        if ctx.purpose != "checkin" or person.get("playbook") != "resident" or ctx.offered_center:
+            return {"saved": True}
+        result = rules.evaluate(person, {**(await store.get("checkins", ctx.checkin_id) or {}), **fields})
+        if result["level"] != "warning":
+            return {"saved": True}
+        # The model tends to fire record_checkin + end_call together and skip the offer, so the
+        # place comes back here, before it says anything else.
+        ctx.offered_center = ctx.center_pending = True
+        place = await _center(ctx, "warming_center" if ctx.hazard == "cold" else "cooling_center")
+        return {"saved": True, "warning_signs": result["reasons"], "place": place,
+                "next_step": "Do NOT say goodbye yet. In your next sentence, offer this place (name, whether it is "
+                             "open now or when it opens, distance). Then ask if a ride would help and STOP talking "
+                             "until they answer. Only after their answer: one closing sentence, then end_call."}
 
     if name == "flag_risk":
         level = args.get("level", "warning")
@@ -182,18 +240,8 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
 
     if name in ("find_cooling_center", "find_warming_center"):
         ctx.offered_center = True
-        rtype = "cooling_center" if name == "find_cooling_center" else "warming_center"
-        lng, lat = person["location"]["coordinates"]
-        r = await store.nearest_resource(lng, lat, rtype, max_m=40000)
-        if not r:
-            return {"found": False, "message": f"No open {rtype.replace('_', ' ')} found nearby in today's data. "
-                                               "Suggest a friend or family member's warm home, or calling 2 1 1."}
-        miles = round(r.get("distance_m", 0) / 1609.34, 1)
-        return {
-            "found": True, "name": r["name"], "address": r["address"],
-            "hours_today": r.get("hours_today"), "distance_miles": miles,
-            "notes": r.get("notes", ""), "data_fetched": _fmt_age(r.get("fetched_at")),
-        }
+        ctx.center_pending = True
+        return await _center(ctx, "cooling_center" if name == "find_cooling_center" else "warming_center")
 
     if name in ("find_ac_assistance", "find_heating_assistance"):
         rtype = "ac_program" if name == "find_ac_assistance" else "heat_program"
@@ -232,6 +280,10 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
             if "symptoms" not in checkin:
                 unanswered.append("symptoms")
         emergency = any(f.get("level") == "emergency" for f in ctx.flags)
+        if ctx.center_pending and not emergency and ctx.end_refusals < 2:
+            ctx.end_refusals += 1
+            return {"ok": False, "error": "Do not hang up yet. Offer the place, ask if a ride would help, and wait for "
+                                          "their answer. Then one closing sentence and end_call."}
         # Warning signs but no cooling/warming center offered yet: the prompt asks for it, the model
         # sometimes skips it, so the code insists (at most twice, like the other end_call guards).
         if (not unanswered and not emergency and ctx.purpose == "checkin" and not ctx.offered_center

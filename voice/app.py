@@ -424,6 +424,8 @@ async def twilio_stream(ws: WebSocket):
     async def on_text(role: str, text: str, final: bool):
         if final:
             log.info("[%s] %s", role, text)
+        if final and role == "USER" and ctx and ctx.center_pending and text.strip():
+            ctx.center_pending = False  # they answered the offer (ride or not)
         # Safety net: the model sometimes says goodbye but never calls end_call, leaving dead air.
         if final and role == "ASSISTANT" and ctx and not ctx.ended and GOODBYE_RE.search(text):
             if await ready_to_end(ctx):
@@ -497,7 +499,7 @@ async def ready_to_end(ctx: CallContext) -> bool:
     checkin = await get_store().get("checkins", ctx.checkin_id) or {}
     if ctx.purpose == "consent":
         return "consent" in checkin
-    if "symptoms" not in checkin:
+    if "symptoms" not in checkin or (ctx.center_pending and ctx.end_refusals < 2):
         return False
     # Same rule as the end_call guard: offer a cooling/warming center on warning signs (give up after 2 tries).
     if (not ctx.offered_center and ctx.end_refusals < 2 and ctx.person.get("playbook") == "resident"
