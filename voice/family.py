@@ -284,7 +284,13 @@ async def add_person(draft: Draft, user: dict = Depends(current_user)):
                                         "phone": geo.normalize_phone(draft.backup_phone), "escalation_order": 2})
     call = await _consent_call(person_id)
     log.info("family user %s added %s (%s, %s)", user["_id"], person_id, person["city"], person["state"])
-    return JSONResponse(_json({"person": await _summary(person, user), "consent_call": call}))
+    try:
+        summary = await _summary(person, user)
+    except Exception:  # the person is saved and the call is placed; don't report failure to the user
+        log.exception("summary after add failed for %s", person_id)
+        summary = {"id": person_id, "name": person.get("name"), "first_name": person.get("first_name"),
+                   "level": "pending", "status": person.get("status")}
+    return JSONResponse(_json({"person": summary, "consent_call": call}))
 
 
 async def _consent_call(person_id: str) -> dict:

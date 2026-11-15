@@ -55,6 +55,9 @@ class MemoryStore:
         if _id in self.db.get(coll, {}):
             self.db[coll][_id].update(copy.deepcopy(fields))
 
+    async def upsert(self, coll: str, _id: str, fields: dict) -> None:
+        self.db.setdefault(coll, {}).setdefault(_id, {"_id": _id}).update(copy.deepcopy(fields))
+
     async def nearest_resource(self, lng: float, lat: float, rtype: str, max_m: float = 15000) -> dict | None:
         best, best_d = None, max_m
         for r in self.db.get("resources", {}).values():
@@ -100,6 +103,10 @@ class MongoStore:
 
     async def update(self, coll, _id, fields):
         await self._run(self.mdb[coll].update_one, {"_id": _id}, {"$set": fields})
+
+    async def upsert(self, coll, _id, fields):
+        """Insert or update in one atomic write (safe when two requests race to fill a cache)."""
+        await self._run(self.mdb[coll].update_one, {"_id": _id}, {"$set": fields}, upsert=True)
 
     async def nearest_resource(self, lng, lat, rtype, max_m=15000):
         """Nearest open resource via $geoNear on the 2dsphere index.

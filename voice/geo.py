@@ -80,5 +80,8 @@ async def geocode(address: str) -> dict | None:
         except Exception as e:
             log.warning("Census geocode failed: %s", e)
     if result:
-        await store.insert("geocode_cache", {"_id": key, "result": result, "at": now()})
+        try:
+            await store.upsert("geocode_cache", key, {"result": result, "at": now()})
+        except Exception as e:
+            log.warning("geocode cache write failed: %s", e)
     return result

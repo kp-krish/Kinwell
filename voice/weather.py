@@ -109,10 +109,10 @@ async def forecast(person: dict) -> dict:
     data = {"high_f": day and day.get("temperature"), "low_f": night and night.get("temperature"),
             "now_label": periods[0].get("name"), "now_f": periods[0].get("temperature"),
             "short": periods[0].get("shortForecast")}
-    if hit:
-        await store.update("weather_cache", url, {"data": data, "fetched_at": now()})
-    else:
-        await store.insert("weather_cache", {"_id": url, "data": data, "fetched_at": now()})
+    try:
+        await store.upsert("weather_cache", url, {"data": data, "fetched_at": now()})
+    except Exception as e:  # a cache write must never break a request
+        log.warning("forecast cache write failed: %s", e)
     return data
 
 
@@ -167,10 +167,9 @@ async def poll(place_call) -> dict:
         if old["_id"] not in {a["_id"] for a in alerts}:
             await store.update("weather_alerts", old["_id"], {"active": False})
     for a in alerts:
-        if await store.get("weather_alerts", a["_id"]):
-            await store.update("weather_alerts", a["_id"], {**a, "active": True, "seen_at": now()})
-        else:
-            await store.insert("weather_alerts", {**a, "active": True, "seen_at": now(), "first_seen": now()})
+        if not await store.get("weather_alerts", a["_id"]):
+            a = {**a, "first_seen": now()}
+        await store.upsert("weather_alerts", a["_id"], {**a, "active": True, "seen_at": now()})
 
     placed = []
     for a in alerts:
