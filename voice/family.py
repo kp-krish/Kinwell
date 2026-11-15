@@ -217,6 +217,23 @@ class Draft(BaseModel):
     your_phone: str = ""
 
 
+SPANISH_RE = re.compile(r"[¿¡ñáéíóú]|\b(gracias|hola|usted|algo|para|tiene|llamar|también)\b", re.I)
+
+
+def _looks_spanish(text: str) -> bool:
+    return bool(SPANISH_RE.search(text or ""))
+
+
+NEXT_QUESTION = {
+    "name": "What's their name?",
+    "phone": "What phone number should we call {first} on?",
+    "address": "What's {first}'s home address? It's used to find the nearest cooling or warming center and local weather alerts.",
+    "language": "Should we call {first} in English or Spanish?",
+    "backup": "Who else could check on {first} if we can't reach you? A name and number, or say skip.",
+    "your_phone": "What's your own phone number, so we can reach you first if something is wrong?",
+}
+
+
 def _missing(d: Draft, user: dict) -> list[str]:
     miss = []
     if not d.name.strip():
@@ -468,6 +485,12 @@ async def assistant(body: AssistantIn, user: dict = Depends(current_user)):
     miss = _missing(draft, user)
     reply = problem or out.get("reply", "")
     latest = body.messages[-1].text.lower() if body.messages else ""
+    # The family member gets replies in their own language, even when the parent's calls are in Spanish.
+    # The model sometimes switches anyway, so check in code and fall back to a fixed English question.
+    user_text = " ".join(m.text for m in body.messages if m.role == "user")
+    if _looks_spanish(reply) and not _looks_spanish(user_text):
+        first = (draft.name or "them").split(" ")[0]
+        reply = NEXT_QUESTION.get(miss[0] if miss else "", "Got it.").format(first=first)
     if EMERGENCY_RE.search(latest) and "911" not in reply:
         reply = "If someone is in danger right now, call 911 first. " + reply
     if not miss and not problem:

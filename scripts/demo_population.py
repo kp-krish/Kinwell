@@ -60,10 +60,11 @@ def main():
             "location": {"type": "Point", "coordinates": [lng, lat]},
             "risk_factors": rnd.choice(RISKS), "playbook": "resident", "caseworker_id": "cw_1",
         })
-        started = now - dt.timedelta(minutes=rnd.randint(20, 240))
+        started = now - dt.timedelta(minutes=rnd.randint(3, 55))
         c = {"_id": f"demo_ck_{i:02d}", "resident_id": rid, "resident_name": f"{first} {last}", "demo": True,
              "playbook": "resident", "started_at": started, "ended_at": started + dt.timedelta(minutes=2),
-             "attempt": 0, "reason": "NWS heat warning", "transcript": [],
+             "attempt": 0, "reason": "NWS Extreme Heat Warning", "transcript": [], "purpose": "checkin",
+             "context": {"hazard": "heat", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"},
              "transcript_expires_at": now + dt.timedelta(days=30)}
         if outcome == "clear":
             c.update(call_status="completed", risk_level="clear", risk_reasons=[], ac_working="yes", water="yes",
@@ -76,9 +77,15 @@ def main():
             reason = {"warning_ac": ("AC not working", "no", "yes", []),
                       "warning_dizzy": ("symptoms: dizziness, headache", "yes", "yes", ["dizziness", "headache"]),
                       "warning_water": ("no water", "yes", "no", [])}[outcome]
+            note = {"warning_ac": f"{first}'s AC stopped this morning and the house is getting hot. {first} feels okay "
+                                  "so far and would take a ride to the library cooling center.",
+                    "warning_dizzy": f"{first} has a headache and feels dizzy even with the AC on. Told to drink water "
+                                     "and rest in the coolest room; callback booked in 30 minutes.",
+                    "warning_water": f"{first} hasn't had much water today and sounded tired. Reminded to drink a "
+                                     "glass now; family asked to check in."}[outcome]
             c.update(call_status="completed", risk_level="warning", risk_reasons=[reason[0]], ac_working=reason[1],
                      water=reason[2], symptoms=reason[3],
-                     case_note={"summary": f"{first} reported: {reason[0]}.", "reason": reason[0],
+                     case_note={"summary": note, "reason": reason[0],
                                 "needs_human_today": True, "ac_status": "broken" if reason[1] == "no" else "working",
                                 "symptoms": reason[3], "memory_summary": reason[0]})
             db.alerts.insert_one({"resident_id": rid, "resident_name": f"{first} {last}", "playbook": "resident",

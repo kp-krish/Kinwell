@@ -126,14 +126,14 @@ export default function App() {
         {view === "map" && (
           <section className="glass relative h-[calc(100vh-190px)] min-h-[420px] overflow-hidden rounded-[26px]">
             <MapView residents={residents} latest={latest} resources={places} onSelect={onSelectResident} />
-            <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-3 rounded-2xl bg-ink/85 px-3 py-2 text-xs text-mist">
+            <div className="pointer-events-none absolute bottom-3 left-3 right-14 flex flex-wrap gap-x-3 gap-y-1 rounded-2xl bg-ink/85 px-3 py-2 text-xs text-mist sm:right-auto">
               {(["emergency", "warning", "calling", "safe"] as Status[]).map((s) => (
                 <span key={s} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}</span>
               ))}
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ice" />Cooling center</span>
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#F4A47C]" />Warming center</span>
-              <span>· hover a center for details</span>
-              <span>· square = crew worker</span>
+              <span className="hidden sm:inline">· hover a center for details</span>
+              <span className="hidden sm:inline">· square = crew worker</span>
             </div>
           </section>
         )}
