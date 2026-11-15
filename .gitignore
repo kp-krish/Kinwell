@@ -29,3 +29,9 @@ scout/maritime_agent.json
 
 # demo screen recordings (large)
 demo/clips/
+demo/_build/
+demo/vo/
+demo/*.mp4
+demo/assets/segoe*.ttf
+demo/assets/segui*.ttf
+demo/assets/pad*
