@@ -135,10 +135,27 @@ def scene_desktop(name: str, clip: str, start: float, d: float, vo: list[tuple[s
     return run(name, [clip] + [f"vo/{k}.wav" for k, _ in vo], v, a, d)
 
 
+def side_captions(caps: list[tuple[str, str, float, float]], y0: int) -> list[str]:
+    """Caption cards in the left column of a phone scene."""
+    out = []
+    for who, text, a, b in caps:
+        rows = text.split(chr(10))
+        h = 84 + 50 * len(rows)
+        en = f"enable='between(t,{a},{b})'"
+        out.append(f"drawbox=x=130:y={y0}:w=900:h={h}:color=0x1E1B28@1:t=fill:{en}")
+        out.append(f"drawbox=x=130:y={y0}:w=900:h={h}:color=0x3A3548@1:t=2:{en}")
+        out.append(f"drawtext=fontfile={SANS_SB}:textfile={txt(who)}:fontsize=22:fontcolor={EMBER}:x=162:y={y0 + 24}:{en}")
+        for i, row in enumerate(rows):
+            out.append(f"drawtext=fontfile={SANS}:textfile={txt(row)}:fontsize=34:fontcolor={INK}:x=162:"
+                       f"y={y0 + 62 + 50 * i}:{en}")
+    return out
+
+
 def scene_phone(name: str, clip: str, start: float, d: float, speed: float, vo: list[tuple[str, float]],
-                eyebrow: str, title: str, sub: str) -> str:
+                eyebrow: str, title: str, sub: str, call: tuple[str, float, float, float] | None = None,
+                caps: list[tuple[str, str, float, float]] | None = None) -> str:
     v = (f"color=c={BG}:s=1920x1080:d={d}:r=30[bg];"
-         f"[0:v]trim=start={start}:duration={d * speed},setpts=(PTS-STARTPTS)/{speed},fps=30,"
+         f"[0:v]trim=start={start}:duration={d * speed},setpts=(PTS-STARTPTS)/{speed},fps=30,tpad=stop_mode=clone:stop_duration=4,"
          f"scale=-2:948:flags=lanczos,pad=iw+12:ih+12:6:6:color=0x2E2A3C[ph];"
          f"[bg][ph]overlay=x=1150:y=(H-h)/2,"
          + draw(eyebrow, SANS_SB, 26, ICE, "150", "330", start=0.3))
@@ -150,8 +167,17 @@ def scene_phone(name: str, clip: str, start: float, d: float, speed: float, vo: 
     for line in sub.split("\n"):
         v += "," + draw(line, SANS, 34, MUTED, "150", str(y), start=0.9)
         y += 50
-    a = audio_chain(1, [o for _, o in vo], d)
-    return run(name, [clip] + [f"vo/{k}.wav" for k, _ in vo], v, a, d)
+    if caps:
+        v += "," + ",".join(side_captions(caps, y + 40))
+    inputs = [clip] + [f"vo/{k}.wav" for k, _ in vo]
+    a = audio_chain(1, [o for _, o in vo], d, ["[call]"] if call else None)
+    if call:
+        path, a0, a1, off = call
+        ms = int(off * 1000)
+        inputs.append(path)
+        a = (f"[{len(inputs) - 1}:a]atrim=start={a0}:end={a1},asetpts=PTS-STARTPTS,aresample=48000,"
+             f"pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1,volume=2.4,adelay={ms}|{ms}[call];" + a)
+    return run(name, inputs, v, a, d)
 
 
 def scene_card(name: str, d: float, vo: list[tuple[str, float]], draws: list[str], logo: bool = False) -> str:
@@ -285,15 +311,21 @@ def main() -> None:
 
     # 5b. Result lands on the board
     d = v["v05"] + 2.0
-    segs.append(scene_desktop("s05b_result", TAKE3, TAKE3_REC0 + 56.0, d, [("v05", 0.5)],
+    segs.append(scene_desktop("s05b_result", TAKE3, TAKE3_REC0 + 58.7, d, [("v05", 0.5)],
                               "Warning: 95°F inside + dizziness", zoom=True))
 
     # 6. Family hears right away
-    d = v["v06"] + 2.2
+    t_alert = 0.4 + v["v06"] + 0.5
+    d = t_alert + 11.7 + 1.0
+    who = "REAL CALL  ·  TO KRISH (FAMILY)"
     segs.append(scene_phone(
-        "s06_family", f"{C}/family_home_phone.mp4", 7.0, d, 1.0, [("v06", 0.4)],
-        "FAMILY ALERT", "Family hears\nright away", "A phone call to the first contact,\nthen the next one if "
-        "nobody answers.\nThe family site shows what happened."))
+        "s06_family", f"{C}/family_home_phone.mp4", 6.5, d, 1.0, [("v06", 0.4)],
+        "FAMILY ALERT", "Family hears\nright away", "A call to the first contact, then the next\nif nobody answers.",
+        call=(f"{C}/call3_family_alert.wav", 0.0, 11.7, t_alert),
+        caps=[(who, "Hello, this is an automated alert\nfrom Kinwell about John.", t_alert, t_alert + 3.5),
+              (who, "On today's heat check-in call, John told us\nthat it is about 95 degrees inside,\n"
+                    "and they are feeling dizzy.", t_alert + 3.5, t_alert + 9.6),
+              (who, "Please check on John soon.", t_alert + 9.6, t_alert + 11.9)]))
 
     # 7. Team view
     d = v["v07"] + 2.6
