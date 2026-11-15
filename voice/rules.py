@@ -127,8 +127,8 @@ def _join(items: list[str]) -> str:
 
 def spoken_findings(person: dict, checkin: dict) -> str:
     """Turn recorded facts into a sentence that sounds natural when read aloud."""
-    who = person.get("first_name") or "they"
-    is_, has = ("are", "have") if who == "they" else ("is", "has")
+    # The sentence already starts with their name ("John told us that ..."), so use "they" here.
+    who, is_, has = "they", "are", "have"
     parts = []
     if checkin.get("ac_working") == "no":
         parts.append("the air conditioning is not working")
@@ -137,6 +137,9 @@ def spoken_findings(person: dict, checkin: dict) -> str:
     t = _degrees(checkin.get("indoor_temp"))
     if t is not None and t < 62:
         parts.append(f"it is about {t} degrees inside")
+    hot = _degrees(checkin.get("indoor_heat")) or (t if t is not None and t >= 90 else None)
+    if hot is not None and hot >= 90:
+        parts.append(f"it is about {hot} degrees inside")
     if checkin.get("power_on") == "no":
         parts.append(f"{who} {has} no power or gas for heat")
     if checkin.get("unsafe_heating") == "yes":
