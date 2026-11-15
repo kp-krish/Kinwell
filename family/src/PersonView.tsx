@@ -8,6 +8,7 @@ export default function PersonView({ id, onRemoved, refreshKey }: { id: string; 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
+  const [pick, setPick] = useState<Hazard | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -30,7 +31,8 @@ export default function PersonView({ id, onRemoved, refreshKey }: { id: string; 
     retry={() => act("retry", () => api.retryConsent(p.id), `Calling ${p.first_name} again now.`)} />;
 
   const tiles = factTiles(p.facts);
-  const checkHazard: Hazard = (p.weather?.alert?.hazard as Hazard) || (new Date().getMonth() >= 10 || new Date().getMonth() <= 2 ? "cold" : "heat");
+  const autoHazard: Hazard = (p.weather?.alert?.hazard as Hazard) || (new Date().getMonth() >= 10 || new Date().getMonth() <= 2 ? "cold" : "heat");
+  const checkHazard: Hazard = pick || autoHazard;
 
   return (
     <div className="fade-in flex flex-col gap-4">
@@ -91,6 +93,17 @@ export default function PersonView({ id, onRemoved, refreshKey }: { id: string; 
       {error && <p className="rounded-2xl bg-[rgba(180,83,42,0.1)] px-4 py-3 text-[14px] text-[#8A3B1C]" role="alert">{error}</p>}
 
       <div className="grid grid-cols-2 gap-2">
+        {p.status === "active" && !p.paused && (
+          <div className="col-span-2 flex items-center gap-2 text-[14px]" role="radiogroup" aria-label="Kind of check-in">
+            <span className="muted">Check for</span>
+            {(["heat", "cold"] as Hazard[]).map((h) => (
+              <button key={h} role="radio" aria-checked={checkHazard === h} onClick={() => setPick(h)}
+                className={`flex h-10 items-center gap-1.5 rounded-full px-4 font-semibold ${checkHazard === h ? "bg-[var(--ink)] text-white" : "bg-white/60"}`}>
+                {h === "heat" ? <Sun size={15} /> : <Snowflake size={15} />}{h === "heat" ? "Heat" : "Cold"}
+              </button>
+            ))}
+          </div>
+        )}
         {p.status === "active" && !p.paused && (
           <button className="btn-ink col-span-2 flex h-12 items-center justify-center gap-2" disabled={!!busy}
             onClick={() => act("check", () => api.checkNow(p.id, checkHazard), `Calling ${p.first_name} now for a ${checkHazard} check-in.`)}>
