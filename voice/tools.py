@@ -128,6 +128,7 @@ class CallContext:
     hangup_cb: object = None  # async callable
     hazard: str = "heat"
     purpose: str = "checkin"
+    offered_center: bool = False
 
 
 def _fmt_age(fetched_at) -> str:
@@ -180,6 +181,7 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
         return {"saved": True, "agreed": agreed}
 
     if name in ("find_cooling_center", "find_warming_center"):
+        ctx.offered_center = True
         rtype = "cooling_center" if name == "find_cooling_center" else "warming_center"
         lng, lat = person["location"]["coordinates"]
         r = await store.nearest_resource(lng, lat, rtype, max_m=40000)
@@ -230,6 +232,16 @@ async def handle_tool(ctx: CallContext, name: str, args: dict) -> dict:
             if "symptoms" not in checkin:
                 unanswered.append("symptoms")
         emergency = any(f.get("level") == "emergency" for f in ctx.flags)
+        # Warning signs but no cooling/warming center offered yet: the prompt asks for it, the model
+        # sometimes skips it, so the code insists (at most twice, like the other end_call guards).
+        if (not unanswered and not emergency and ctx.purpose == "checkin" and not ctx.offered_center
+                and ctx.person.get("playbook") == "resident" and ctx.end_refusals < 2
+                and rules.evaluate(ctx.person, checkin)["level"] == "warning"):
+            ctx.end_refusals += 1
+            tool = "find_warming_center" if ctx.hazard == "cold" else "find_cooling_center"
+            return {"ok": False, "error": f"Do not hang up yet. There are warning signs. Call {tool}, offer the "
+                                          "place with today's hours and distance, ask if a ride would help, then say "
+                                          "your one closing sentence and call end_call."}
         if unanswered and not emergency and ctx.end_refusals < 2:
             ctx.end_refusals += 1
             then = "" if ctx.purpose == "consent" else " Then call record_checkin, say goodbye, and call end_call."

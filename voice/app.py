@@ -495,7 +495,15 @@ async def ready_to_end(ctx: CallContext) -> bool:
     if any(f.get("level") == "emergency" for f in ctx.flags):
         return True
     checkin = await get_store().get("checkins", ctx.checkin_id) or {}
-    return "consent" in checkin if ctx.purpose == "consent" else "symptoms" in checkin
+    if ctx.purpose == "consent":
+        return "consent" in checkin
+    if "symptoms" not in checkin:
+        return False
+    # Same rule as the end_call guard: offer a cooling/warming center on warning signs (give up after 2 tries).
+    if (not ctx.offered_center and ctx.end_refusals < 2 and ctx.person.get("playbook") == "resident"
+            and rules.evaluate(ctx.person, checkin)["level"] == "warning"):
+        return False
+    return True
 
 
 async def post_call(ctx: CallContext, transcript: list[dict]) -> None:
