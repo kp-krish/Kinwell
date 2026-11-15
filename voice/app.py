@@ -9,6 +9,7 @@ import asyncio
 import base64
 import datetime as dt
 import json
+import re
 import logging
 import time
 from xml.sax.saxutils import quoteattr
@@ -261,6 +262,16 @@ async def twilio_stream(ws: WebSocket):
     async def on_text(role: str, text: str, final: bool):
         if final:
             log.info("[%s] %s", role, text)
+        # Safety net: the model sometimes says goodbye but never calls end_call, leaving dead air.
+        if final and role == "ASSISTANT" and ctx and not ctx.ended and GOODBYE_RE.search(text):
+            if await ready_to_end(ctx):
+                ctx.ended = True
+                log.info("goodbye heard without end_call; hanging up checkin=%s", ctx.checkin_id)
+                asyncio.create_task(fallback_hangup())
+
+    async def fallback_hangup():
+        await asyncio.sleep(1.5)  # audio for the goodbye can still be arriving after its text
+        await hangup()
 
     async def hangup():
         # Let the goodbye finish playing, then end the call.
@@ -313,6 +324,17 @@ async def twilio_stream(ws: WebSocket):
             await session.close()
         if ctx:
             asyncio.create_task(post_call(ctx, session.transcript if session else []))
+
+
+GOODBYE_RE = re.compile(r"\b(good ?bye|bye now|adi[oó]s|hasta luego)\b", re.I)
+
+
+async def ready_to_end(ctx: CallContext) -> bool:
+    """The call has what it needs: consent answered, or the check-in recorded, or an emergency flagged."""
+    if any(f.get("level") == "emergency" for f in ctx.flags):
+        return True
+    checkin = await get_store().get("checkins", ctx.checkin_id) or {}
+    return "consent" in checkin if ctx.purpose == "consent" else "symptoms" in checkin
 
 
 async def post_call(ctx: CallContext, transcript: list[dict]) -> None:
