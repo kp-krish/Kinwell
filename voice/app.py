@@ -305,6 +305,7 @@ class Prepared:
 
 
 PREPARED: dict[str, asyncio.Task] = {}
+GREETING_DELAY_S = float(os.environ.get("GREETING_DELAY_S", "1.5"))
 PREWARM_TTL_S = 70  # Twilio rings for 25 s; drop an unclaimed session well after that
 
 
@@ -465,6 +466,9 @@ async def twilio_stream(ws: WebSocket):
                 session, ctx = prepared.session, prepared.ctx
                 ctx.call_sid = ctx.call_sid or start.get("callSid", "")
                 ctx.hangup_cb = hangup
+                if warm:
+                    # The greeting is ready instantly; give the person a moment to bring the phone to their ear.
+                    await asyncio.sleep(GREETING_DELAY_S)
                 buffered = await prepared.relay.attach(send_audio, on_text, on_interrupt)
                 log.info("stream started checkin=%s person=%s warm=%s buffered_chunks=%d",
                          checkin_id, ctx.person["_id"], warm, buffered)
