@@ -451,7 +451,8 @@ async def assistant(body: AssistantIn, user: dict = Depends(current_user)):
                                   "It should have 10 digits, like 602-555-0123.")
     norm = {f: geo.normalize_phone(getattr(draft, f)) for f in ("phone", "backup_phone", "your_phone")}
     mine = norm["your_phone"] or user.get("phone")
-    if norm["phone"] and norm["phone"] == mine:
+    # One-phone demo: the demo number may be both the person and the family member.
+    if norm["phone"] and norm["phone"] == mine and norm["phone"] != geo.normalize_phone(config.DEMO_PHONE_NUMBER):
         draft.phone, problem = "", problem or ("That's your own number. What number should we call them on? "
                                                "You'll be the first person we alert.")
     if norm["backup_phone"] and norm["backup_phone"] in (norm["phone"], mine):
