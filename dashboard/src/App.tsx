@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, BellRing, CheckCircle2, ClipboardList, Globe2, HardHat, Loader2, Phone, PhoneCall,
-  RefreshCw, Sparkles, ThermometerSun, X,
+  RefreshCw, Snowflake, Sparkles, ThermometerSun, X,
 } from "lucide-react";
 import { api, ago, clock, type Briefing, type Checkin, type Resident, type State } from "./api";
 import MapView from "./MapView";
@@ -65,7 +65,7 @@ export default function App() {
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-heat-500 text-white shadow-sm"><ThermometerSun size={20} /></div>
           <div>
             <h1 className="text-lg font-semibold leading-tight">HeatCheck</h1>
-            <p className="text-xs text-stone-500">Heat-safety check-ins · Maricopa County</p>
+            <p className="text-xs text-stone-500">Heat and cold check-ins</p>
           </div>
         </div>
         <div className="ml-0 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-800 ring-1 ring-red-200 sm:ml-4">
@@ -78,6 +78,13 @@ export default function App() {
             className="inline-flex items-center gap-2 rounded-lg bg-heat-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-heat-700 disabled:opacity-60">
             {busy === "simulate" ? <Loader2 size={16} className="animate-spin" /> : <BellRing size={16} />}
             Simulate heat warning
+          </button>
+          <button
+            onClick={() => run("simulateCold", api.simulateCold)}
+            disabled={!!busy}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-sky-800 disabled:opacity-60">
+            {busy === "simulateCold" ? <Loader2 size={16} className="animate-spin" /> : <Snowflake size={16} />}
+            Simulate cold warning
           </button>
         </div>
       </header>

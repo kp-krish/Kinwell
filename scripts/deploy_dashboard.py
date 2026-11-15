@@ -1,7 +1,7 @@
 """Build the dashboard against the deployed API and publish it to AWS Amplify Hosting
 (manual zip deployment, so Amplify needs no access to the private GitHub repo).
 
-Usage: python scripts/deploy_dashboard.py https://<cloudfront-domain>
+Usage: python scripts/deploy_dashboard.py https://<cloudfront-domain> [dashboard|family]
 """
 import io
 import os
@@ -15,12 +15,13 @@ import boto3
 import httpx
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DASH = ROOT / "dashboard"
 REGION = os.environ.get("INFRA_REGION", "us-east-2")
-APP_NAME = "heatcheck-sunhacks-dashboard"
+APPS = {"dashboard": "heatcheck-sunhacks-dashboard", "family": "heatcheck-sunhacks-family"}
 
 
-def main(api_base: str):
+def main(api_base: str, which: str = "dashboard"):
+    DASH = ROOT / which
+    APP_NAME = APPS[which]
     env = dict(os.environ, VITE_API_BASE=api_base)
     subprocess.run("npm run build", cwd=DASH, shell=True, check=True, env=env)
 
@@ -52,4 +53,4 @@ def main(api_base: str):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1].rstrip("/"))
+    main(sys.argv[1].rstrip("/"), sys.argv[2] if len(sys.argv) > 2 else "dashboard")

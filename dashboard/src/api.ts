@@ -65,6 +65,7 @@ export const api = {
   briefing: () => j<Briefing>("/api/briefing"),
   ack: (id: string) => j(`/api/alerts/${id}/ack`, { method: "POST", body: JSON.stringify({ by: "caseworker" }) }),
   simulate: () => j<{ calls: unknown[]; scout: unknown }>("/api/simulate-heat-warning", { method: "POST", body: "{}" }),
+  simulateCold: () => j<{ calls: unknown[]; scout: unknown }>("/api/simulate-weather", { method: "POST", body: JSON.stringify({ hazard: "cold" }) }),
   call: (person_id: string) => j("/calls", { method: "POST", body: JSON.stringify({ person_id, reason: "dashboard" }) }),
   refreshScout: () => j("/api/scout/refresh", { method: "POST", body: "{}" }),
   startShift: (crewId: string) => j(`/api/crews/${crewId}/start-shift`, { method: "POST", body: "{}" }),
