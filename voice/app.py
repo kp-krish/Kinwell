@@ -12,6 +12,7 @@ import json
 import re
 import logging
 import time
+from dataclasses import dataclass
 from xml.sax.saxutils import quoteattr
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -102,6 +103,7 @@ async def place_call(person_id: str, attempt: int = 0, reason: str = "scheduled 
         amd_callback=f"https://{base}/twilio/amd?checkin_id={checkin_id}",
     )
     await store.update("checkins", checkin_id, {"call_sid": res.get("sid")})
+    start_prewarm(checkin_id, res.get("sid") or "")
     log.info("dialing %s checkin=%s sid=%s", person_id, checkin_id, res.get("sid"))
     return {"checkin_id": checkin_id, "call_sid": res.get("sid")}
 
@@ -208,6 +210,7 @@ async def twilio_voice(request: Request, checkin_id: str, AnsweredBy: str = Form
         store = get_store()
         checkin = await store.get("checkins", checkin_id)
         log.info("voicemail detected checkin=%s answered_by=%s", checkin_id, AnsweredBy)
+        asyncio.create_task(discard_prepared(checkin_id))
         if checkin:
             await store.update("checkins", checkin_id, {"answered_by": AnsweredBy})
             person = await store.get("residents", checkin["resident_id"])
@@ -249,6 +252,8 @@ async def twilio_status(checkin_id: str, CallStatus: str = Form(""), CallDuratio
     store = get_store()
     checkin = await store.get("checkins", checkin_id)
     log.info("status checkin=%s status=%s", checkin_id, CallStatus)
+    if CallStatus in ("no-answer", "busy", "failed", "canceled") or checkin_id in PREPARED:
+        asyncio.create_task(discard_prepared(checkin_id))
     if checkin and CallStatus in ("no-answer", "busy", "failed", "canceled"):
         person = await store.get("residents", checkin["resident_id"])
         await rules.on_no_answer(person, checkin_id, checkin.get("attempt", 0))
@@ -256,6 +261,135 @@ async def twilio_status(checkin_id: str, CallStatus: str = Form(""), CallDuratio
 
 
 # ---------------------------------------------------------------- media stream
+
+class Relay:
+    """Sits between a Sonic session and the phone line. Before the call is answered, the agent's
+    greeting is generated and buffered here; on answer it is flushed so the caller hears it at once."""
+
+    def __init__(self) -> None:
+        self.audio = self.text = self.interrupt = None
+        self.buffer: list[bytes] = []
+
+    async def on_audio(self, pcm: bytes) -> None:
+        if self.audio:
+            await self.audio(pcm)
+        else:
+            self.buffer.append(pcm)
+
+    async def on_text(self, role: str, text: str, final: bool) -> None:
+        if self.text:
+            await self.text(role, text, final)
+        elif final:
+            log.info("[%s] (before answer) %s", role, text)
+
+    async def on_interrupt(self) -> None:
+        if self.interrupt:
+            await self.interrupt()
+
+    async def attach(self, audio, text, interrupt) -> int:
+        self.text, self.interrupt = text, interrupt
+        n = 0
+        while self.buffer:
+            await audio(self.buffer.pop(0))
+            n += 1
+        self.audio = audio
+        return n
+
+
+@dataclass
+class Prepared:
+    session: SonicSession
+    ctx: CallContext
+    relay: Relay
+    keepalive: asyncio.Task | None = None
+
+
+PREPARED: dict[str, asyncio.Task] = {}
+PREWARM_TTL_S = 70  # Twilio rings for 25 s; drop an unclaimed session well after that
+
+
+async def prepare_call(checkin_id: str, call_sid: str) -> Prepared:
+    store = get_store()
+    checkin = await store.get("checkins", checkin_id)
+    person = await store.get("residents", checkin["resident_id"])
+    purpose = checkin.get("purpose", "checkin")
+    call_ctx = {"hazard": "heat", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}
+    call_ctx.update(checkin.get("context") or {})
+    call_ctx["purpose"] = purpose
+    call_ctx["local_time"] = local_now(person).strftime("%I:%M %p").lstrip("0")
+    hazard = call_ctx.get("hazard", "heat")
+    ctx = CallContext(person=person, checkin_id=checkin_id, call_sid=call_sid, hazard=hazard, purpose=purpose)
+    memory_bullets = await memory.recall(person) if purpose == "checkin" else []
+    await store.update("checkins", checkin_id, {"memory_used": memory_bullets})
+    relay = Relay()
+    session = SonicSession(
+        system_prompt=build_system_prompt(person, call_ctx, memory_bullets),
+        voice_id=VOICES.get(person.get("language", "en"), "tiffany"),
+        tools=tools_for(purpose, hazard),
+        on_audio=relay.on_audio, on_text=relay.on_text, on_interrupt=relay.on_interrupt,
+        on_tool=lambda name, args: handle_tool(ctx, name, args),
+    )
+    await session.start()
+    return Prepared(session=session, ctx=ctx, relay=relay)
+
+
+async def _silence(session: SonicSession) -> None:
+    """Feed silence while the phone rings so the Sonic stream stays open."""
+    frame = b"\x00" * 1600  # 100 ms at 8 kHz, 16-bit
+    while session.active:
+        await session.send_audio(frame)
+        await asyncio.sleep(0.1)
+
+
+async def _prewarm(checkin_id: str, call_sid: str) -> Prepared:
+    t0 = time.monotonic()
+    p = await prepare_call(checkin_id, call_sid)
+    p.keepalive = asyncio.create_task(_silence(p.session))
+    await p.session.send_user_text(opening_nudge(p.ctx.person))
+    log.info("prewarmed checkin=%s in %.2fs", checkin_id, time.monotonic() - t0)
+    asyncio.create_task(_expire(checkin_id))
+    return p
+
+
+def start_prewarm(checkin_id: str, call_sid: str) -> None:
+    PREPARED[checkin_id] = asyncio.create_task(_prewarm(checkin_id, call_sid))
+
+
+async def claim_prepared(checkin_id: str) -> Prepared | None:
+    task = PREPARED.pop(checkin_id, None)
+    if not task:
+        return None
+    try:
+        p = await asyncio.wait_for(task, timeout=6)
+    except Exception:
+        log.exception("prewarm failed for %s; building the session now", checkin_id)
+        return None
+    if p.keepalive:
+        p.keepalive.cancel()
+    if not p.session.active:
+        return None
+    return p
+
+
+async def discard_prepared(checkin_id: str) -> None:
+    task = PREPARED.pop(checkin_id, None)
+    if not task:
+        return
+    try:
+        p = await asyncio.wait_for(task, timeout=10)
+        if p.keepalive:
+            p.keepalive.cancel()
+        await p.session.close()
+        log.info("discarded unused prewarm checkin=%s", checkin_id)
+    except Exception:
+        pass
+
+
+async def _expire(checkin_id: str) -> None:
+    await asyncio.sleep(PREWARM_TTL_S)
+    if checkin_id in PREPARED:
+        await discard_prepared(checkin_id)
+
 
 @app.websocket("/twilio/stream")
 async def twilio_stream(ws: WebSocket):
@@ -313,32 +447,18 @@ async def twilio_stream(ws: WebSocket):
                 start = msg["start"]
                 stream_sid = start["streamSid"]
                 checkin_id = start.get("customParameters", {}).get("checkin_id")
-                checkin = await store.get("checkins", checkin_id)
-                person = await store.get("residents", checkin["resident_id"])
                 await store.update("checkins", checkin_id, {"call_status": "in_progress", "answered_at": now()})
-                purpose = checkin.get("purpose", "checkin")
-                call_ctx = {"hazard": "heat", "high_f": 112, "alert_type": "NWS Extreme Heat Warning"}
-                call_ctx.update(checkin.get("context") or {})
-                call_ctx["purpose"] = purpose
-                call_ctx["local_time"] = local_now(person).strftime("%I:%M %p").lstrip("0")
-                hazard = call_ctx.get("hazard", "heat")
-                ctx = CallContext(person=person, checkin_id=checkin_id, call_sid=start.get("callSid", ""),
-                                  hangup_cb=hangup, hazard=hazard, purpose=purpose)
-                memory_bullets = await memory.recall(person) if purpose == "checkin" else []
-                prompt = build_system_prompt(person, call_ctx, memory_bullets)
-                await store.update("checkins", checkin_id, {"memory_used": memory_bullets})
-                session = SonicSession(
-                    system_prompt=prompt,
-                    voice_id=VOICES.get(person.get("language", "en"), "tiffany"),
-                    tools=tools_for(purpose, hazard),
-                    on_audio=send_audio, on_text=on_text, on_interrupt=on_interrupt,
-                    on_tool=lambda name, args: handle_tool(ctx, name, args),
-                )
-                t0 = time.monotonic()
-                await session.start()
-                await session.send_user_text(opening_nudge(person))
-                log.info("sonic ready in %.2fs checkin=%s", time.monotonic() - t0, checkin_id)
-                log.info("stream started checkin=%s person=%s memory=%d", checkin_id, person["_id"], len(memory_bullets))
+                prepared = await claim_prepared(checkin_id)
+                warm = prepared is not None
+                if not prepared:  # not pre-warmed (or it failed): build it now
+                    prepared = await prepare_call(checkin_id, start.get("callSid", ""))
+                    await prepared.session.send_user_text(opening_nudge(prepared.ctx.person))
+                session, ctx = prepared.session, prepared.ctx
+                ctx.call_sid = ctx.call_sid or start.get("callSid", "")
+                ctx.hangup_cb = hangup
+                buffered = await prepared.relay.attach(send_audio, on_text, on_interrupt)
+                log.info("stream started checkin=%s person=%s warm=%s buffered_chunks=%d",
+                         checkin_id, ctx.person["_id"], warm, buffered)
             elif ev == "media" and session:
                 await session.send_audio(mulaw_to_pcm16(base64.b64decode(msg["media"]["payload"])))
             elif ev == "stop":

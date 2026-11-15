@@ -62,6 +62,10 @@ def evaluate(person: dict, checkin: dict) -> dict:
     t = _degrees(checkin.get("indoor_temp"))
     if t is not None and t < 62:
         reasons.append(f"home is cold, about {t} degrees inside")
+    # Heat: a very hot home is dangerous even when the person says the AC "works".
+    hot = _degrees(checkin.get("indoor_heat")) or (t if t is not None and t >= 90 else None)
+    if hot is not None and hot >= 90:
+        reasons.append(f"home is very hot, about {hot} degrees inside")
     crew = person.get("playbook") == "crew"
     # Crews: a single missed water/shade break gets a reminder on the call, not a supervisor alert
     # (worker privacy); two in a row is handled by _crew_consecutive_check.
@@ -80,13 +84,38 @@ def evaluate(person: dict, checkin: dict) -> dict:
     return {"level": "warning" if reasons else "clear", "reasons": reasons}
 
 
+_UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine".split())}
+_TEENS = {w: 10 + i for i, w in enumerate("ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * (i + 2) for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split())}
+
+
 def _degrees(text) -> int | None:
+    """First temperature in what the caller said, as digits ("85") or words ("ninety five", "a hundred")."""
     import re
-    m = re.search(r"-?\d{2,3}", str(text or ""))
-    if not m:
-        return None
-    v = int(m.group())
-    return v if 20 <= v <= 100 else None
+    raw = str(text or "").lower()
+    m = re.search(r"-?\d{2,3}", raw)
+    if m:
+        v = int(m.group())
+        return v if 20 <= v <= 130 else None
+    words = re.findall(r"[a-z]+", raw.replace("-", " "))
+    for i, w in enumerate(words):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if w == "hundred":
+            v = 100
+            rest = [x for x in words[i + 1:i + 4] if x != "and"]
+            if rest and rest[0] in _TENS:
+                v += _TENS[rest[0]] + (_UNITS.get(rest[1], 0) if len(rest) > 1 else 0)
+            elif rest and rest[0] in _TEENS:
+                v += _TEENS[rest[0]]
+            elif rest and rest[0] in _UNITS:
+                v += _UNITS[rest[0]]
+            return v if v <= 130 else None
+        if w in _TENS:
+            v = _TENS[w] + _UNITS.get(nxt, 0)
+            return v if v >= 20 else None
+        if w in _TEENS:
+            return None  # too low to be an indoor temperature we act on
+    return None
 
 
 def _join(items: list[str]) -> str:
