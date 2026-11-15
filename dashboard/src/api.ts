@@ -88,3 +88,15 @@ export function clock(iso?: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Phoenix" });
 }
+
+/** One record per place: a live Resource Scout record replaces the seed record for the same place. */
+export function dedupePlaces(resources: Resource[]): Resource[] {
+  const key = (r: Resource) => r.type + ":" + r.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const live = (r: Resource) => !!r.source_url && r.source_url !== "seed";
+  const best = new Map<string, Resource>();
+  for (const r of resources) {
+    const k = key(r), prev = best.get(k);
+    if (!prev || (live(r) && !live(prev)) || (live(r) === live(prev) && (r.fetched_at || "") > (prev.fetched_at || ""))) best.set(k, r);
+  }
+  return resources.filter((r) => best.get(key(r)) === r);
+}

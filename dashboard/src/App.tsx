@@ -3,7 +3,7 @@ import {
   AlertTriangle, ChevronLeft, Globe2, HardHat, List, Loader2, Lock, Map as MapIcon, Phone, PhoneCall,
   RefreshCw, Snowflake, Sparkles, Sun, Users,
 } from "lucide-react";
-import { api, ago, clock, type Alert, type Briefing, type Checkin, type Resident, type State } from "./api";
+import { api, ago, clock, dedupePlaces, type Alert, type Briefing, type Checkin, type Resident, type State } from "./api";
 import MapView from "./MapView";
 import { STATUS_META, latestByResident, statusOf, type Status } from "./status";
 
@@ -40,6 +40,7 @@ export default function App() {
 
   const latest = useMemo(() => latestByResident(state?.checkins || []), [state]);
   const residents = useMemo(() => state?.residents || [], [state]);
+  const places = useMemo(() => dedupePlaces(state?.resources || []), [state]);
   const openAlerts = useMemo(() => (state?.alerts || []).filter((a) => !a.resolved_at), [state]);
   const alertFor = useMemo(() => {
     const m = new Map<string, Alert>();
@@ -120,7 +121,7 @@ export default function App() {
 
         {view === "map" && (
           <section className="glass relative h-[calc(100vh-190px)] min-h-[420px] overflow-hidden rounded-[26px]">
-            <MapView residents={residents} latest={latest} resources={state?.resources || []} onSelect={onSelectResident} />
+            <MapView residents={residents} latest={latest} resources={places} onSelect={onSelectResident} />
             <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-3 rounded-2xl bg-ink/85 px-3 py-2 text-xs text-mist">
               {(["emergency", "warning", "calling", "safe"] as Status[]).map((s) => (
                 <span key={s} className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[s].color }} />{STATUS_META[s].label}</span>
@@ -384,7 +385,7 @@ function SafeList({ people, latest, onOpen, hazard }: { people: Resident[]; late
 
 function PlacesNote({ state, hazard, now }: { state: State | null; hazard: "heat" | "cold"; now: number }) {
   const type = hazard === "cold" ? "warming_center" : "cooling_center";
-  const places = (state?.resources || []).filter((r) => r.type === type);
+  const places = dedupePlaces(state?.resources || []).filter((r) => r.type === type);
   if (!places.length) return null;
   const fetched = places.map((p) => p.fetched_at || "").sort().pop();
   return (
@@ -469,7 +470,7 @@ function CrewView({ state, onStartShift, ...act }: { state: State | null; onStar
 }
 
 function Resources({ state, now, busy, onRefresh }: { state: State | null; now: number; busy: string | null; onRefresh: () => void }) {
-  const places = (state?.resources || []).filter((r) => r.type === "cooling_center" || r.type === "warming_center");
+  const places = dedupePlaces(state?.resources || []).filter((r) => r.type === "cooling_center" || r.type === "warming_center");
   const programs = (state?.resources || []).filter((r) => !places.includes(r));
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[1fr_420px]">
