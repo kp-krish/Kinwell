@@ -29,6 +29,7 @@
 }
 
 html, body, #root { min-height: 100%; }
+html { background: var(--bg); transition: background-color 600ms ease; }
 body {
   margin: 0;
   background: var(--bg);
@@ -38,7 +39,13 @@ body {
   transition: background-color 600ms ease, color 600ms ease;
 }
 
-.backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.backdrop {
+  position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
+  /* Fade the glows out at the very top so the phone's status-bar strip (which Safari colors
+     from the top edge of the page) matches the page background instead of a cut-off glow. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent env(safe-area-inset-top, 0px), #000 calc(env(safe-area-inset-top, 0px) + 160px));
+  mask-image: linear-gradient(to bottom, transparent 0, transparent env(safe-area-inset-top, 0px), #000 calc(env(safe-area-inset-top, 0px) + 160px));
+}
 .backdrop span {
   position: absolute; border-radius: 50%;
   transition: background 900ms ease, transform 1200ms ease;
