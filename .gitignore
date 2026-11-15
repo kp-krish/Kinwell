@@ -26,3 +26,6 @@ Thumbs.db
 .idea/
 
 scout/maritime_agent.json
+
+# demo screen recordings (large)
+demo/clips/
