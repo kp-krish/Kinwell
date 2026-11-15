@@ -3,12 +3,12 @@ import type { Checkin, Resident } from "./api";
 export type Status = "emergency" | "warning" | "no_answer" | "calling" | "safe" | "pending";
 
 export const STATUS_META: Record<Status, { label: string; color: string; chip: string }> = {
-  emergency: { label: "Emergency", color: "#dc2626", chip: "bg-red-100 text-red-800 ring-red-200" },
-  warning: { label: "Needs attention", color: "#f59e0b", chip: "bg-amber-100 text-amber-800 ring-amber-200" },
-  no_answer: { label: "No answer", color: "#6b7280", chip: "bg-stone-200 text-stone-700 ring-stone-300" },
-  calling: { label: "On a call", color: "#2563eb", chip: "bg-blue-100 text-blue-800 ring-blue-200" },
-  safe: { label: "Safe", color: "#16a34a", chip: "bg-green-100 text-green-800 ring-green-200" },
-  pending: { label: "Not called yet", color: "#a8a29e", chip: "bg-stone-100 text-stone-600 ring-stone-200" },
+  emergency: { label: "Emergency", color: "#FF8F80", chip: "bg-[#FF8F80] text-[#2A0D09]" },
+  warning: { label: "Needs attention", color: "#F2C46B", chip: "bg-[#F2C46B] text-[#2B1C02]" },
+  no_answer: { label: "No answer", color: "#B9B1C8", chip: "bg-white/15 text-white" },
+  calling: { label: "On a call", color: "#8DB4E8", chip: "bg-[#8DB4E8]/25 text-[#CFE0F7]" },
+  safe: { label: "Safe", color: "#8FD3A8", chip: "bg-[#8FD3A8]/20 text-[#B7E4C6]" },
+  pending: { label: "Not called yet", color: "#7D7590", chip: "bg-white/10 text-[#C9C1D6]" },
 };
 
 export function latestByResident(checkins: Checkin[]): Map<string, Checkin> {

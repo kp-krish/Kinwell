@@ -4,7 +4,7 @@ import type { Checkin, Resident, Resource } from "./api";
 import { STATUS_META, statusOf } from "./status";
 
 // Amazon Location Service map style when configured (VITE_MAP_STYLE), otherwise an open style.
-const STYLE = (import.meta.env.VITE_MAP_STYLE as string | undefined) || "https://tiles.openfreemap.org/styles/positron";
+const STYLE = (import.meta.env.VITE_MAP_STYLE as string | undefined) || "https://tiles.openfreemap.org/styles/fiord";
 
 interface Props {
   residents: Resident[];
@@ -34,12 +34,12 @@ export default function MapView({ residents, latest, resources, onSelect }: Prop
     markers.current = [];
 
     for (const c of resources) {
-      if (!c.location || c.type !== "cooling_center" || c.source_url === "seed") continue;
+      if (!c.location || !["cooling_center", "warming_center"].includes(c.type) || c.source_url === "seed") continue;
       const d = document.createElement("div");
       d.className = "center-marker";
       d.title = c.name;
       const popup = new maplibregl.Popup({ offset: 10 }).setHTML(
-        `<div style="font:13px Inter,sans-serif"><b>${c.name}</b><br/>${c.hours_today || ""}<br/><span style="color:#78716c">${c.address}</span></div>`);
+        `<div style="font:13px Inter Tight,sans-serif"><b>${c.name}</b><br/>${c.hours_today || ""}<br/><span style="color:#A9A1B8">${c.address}</span></div>`);
       markers.current.push(new maplibregl.Marker({ element: d }).setLngLat(c.location.coordinates).setPopup(popup).addTo(m));
     }
 

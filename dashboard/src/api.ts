@@ -6,7 +6,8 @@ export interface Resident {
   _id: string; name: string; first_name?: string; phone?: string; language?: string;
   address?: string; location: Point; zip?: string; risk_factors?: string[];
   playbook: "resident" | "crew"; crew_id?: string; crew_name?: string; employer?: string;
-  enrolled_by?: string; demo?: boolean;
+  enrolled_by?: string; demo?: boolean; city?: string; state?: string; status?: string; paused?: boolean;
+  hazards?: string[]; relationship?: string;
 }
 export interface Flag { level: "warning" | "emergency"; reason: string; at: string }
 export interface CaseNote { summary: string; ac_status: string; symptoms: string[]; needs_human_today: boolean; reason: string; memory_summary: string; model?: string }
@@ -15,7 +16,9 @@ export interface Checkin {
   ended_at?: string; call_status: string; risk_level?: string; risk_reasons?: string[];
   ac_working?: string; water?: string; rest_break?: string; symptoms?: string[]; flags?: Flag[];
   case_note?: CaseNote; memory_used?: string[]; attempt?: number; reason?: string; callback_at?: string;
-  transcript?: { role: string; text: string }[]; demo?: boolean;
+  transcript?: { role: string; text: string }[]; demo?: boolean; purpose?: string;
+  context?: { hazard?: "heat" | "cold"; high_f?: number | string; low_f?: number | string; alert_type?: string };
+  heat_working?: string; indoor_temp?: string; power_on?: string; unsafe_heating?: string;
 }
 export interface Alert {
   _id: string; resident_id: string; resident_name?: string; playbook?: string; level: string; reason: string;
@@ -32,8 +35,9 @@ export interface ScoutRun {
 }
 export interface State {
   residents: Resident[]; checkins: Checkin[]; alerts: Alert[]; resources: Resource[];
-  crews: Crew[]; scout_runs: ScoutRun[]; server_time: string;
+  crews: Crew[]; scout_runs: ScoutRun[]; server_time: string; weather_alerts?: WeatherAlert[];
 }
+export interface WeatherAlert { _id: string; event: string; hazard: "heat" | "cold"; headline?: string; zones: string[]; ends?: string; calls: boolean; watch: boolean }
 export interface Briefing { headline: string; calls: number; items: { resident_id: string; name: string; priority: number; reason: string }[]; model?: string }
 
 const KEY_STORE = "heatcheck.staffKey";

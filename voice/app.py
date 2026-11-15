@@ -375,6 +375,7 @@ async def api_state():
     resources = await store.find("resources")
     crews = await store.find("crews")
     runs = await store.find("scout_runs", sort="started_at", limit=5)
+    weather_alerts = await store.find("weather_alerts", {"active": True})
     # Simulator test people (scripts/sim_call.py) stay out of the dashboard.
     sim_ids = {r["_id"] for r in residents if r.get("sim") or r.get("status") == "removed"}
     residents = [r for r in residents if r["_id"] not in sim_ids]
@@ -384,7 +385,7 @@ async def api_state():
         c.pop("transcript", None)
     return JSONResponse(_jsonable({"residents": residents, "checkins": checkins, "alerts": alerts,
                                    "resources": resources, "crews": crews, "scout_runs": runs,
-                                   "server_time": now()}))
+                                   "weather_alerts": weather_alerts, "server_time": now()}))
 
 
 @app.get("/api/checkins/{checkin_id}")
